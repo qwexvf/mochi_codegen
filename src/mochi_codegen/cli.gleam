@@ -1,10 +1,10 @@
-// mochi/cli.gleam
+// mochi_codegen/cli.gleam
 // CLI for generating code from GraphQL schemas
 //
 // Usage:
-//   gleam run -m mochi/cli -- init                     Create mochi.config.json
-//   gleam run -m mochi/cli -- generate                 Generate from config
-//   gleam run -m mochi/cli -- <schema.graphql> [opts]  Direct mode
+//   gleam run -m mochi_codegen/cli -- init                     Create mochi.config.json
+//   gleam run -m mochi_codegen/cli -- generate                 Generate from config
+//   gleam run -m mochi_codegen/cli -- <schema.graphql> [opts]  Direct mode
 //
 // Options (direct mode):
 //   --typescript, -t <file>   Generate TypeScript types
@@ -105,7 +105,7 @@ fn run_init(args: List(String)) -> Result(String, CliError) {
                 <> "  2. Create your schema file: "
                 <> conf.schema
                 <> "\n"
-                <> "  3. Run: gleam run -m mochi/cli -- generate",
+                <> "  3. Run: gleam run -m mochi_codegen/cli -- generate",
               )
             Error(msg) -> Error(WriteError(config.config_file, msg))
           }
@@ -647,7 +647,7 @@ fn help_text() -> String {
   "mochi - GraphQL Code Generator for Gleam
 
 Usage:
-  gleam run -m mochi/cli -- <command>
+  gleam run -m mochi_codegen/cli -- <command>
 
 Commands:
   init                       Create mochi.config.json
@@ -663,11 +663,11 @@ Direct Mode Options:
   --help, -h                Show this help
 
 Examples:
-  gleam run -m mochi/cli -- init
-  gleam run -m mochi/cli -- init schema.graphql
-  gleam run -m mochi/cli -- generate
-  gleam run -m mochi/cli -- schema.graphql -t types.ts
-  gleam run -m mochi/cli -- schema.graphql --all generated/schema
+  gleam run -m mochi_codegen/cli -- init
+  gleam run -m mochi_codegen/cli -- init schema.graphql
+  gleam run -m mochi_codegen/cli -- generate
+  gleam run -m mochi_codegen/cli -- schema.graphql -t types.ts
+  gleam run -m mochi_codegen/cli -- schema.graphql --all generated/schema
 "
 }
 
@@ -675,14 +675,14 @@ fn init_help_text() -> String {
   "mochi init - Initialize a mochi project
 
 Usage:
-  gleam run -m mochi/cli -- init [schema_path]
+  gleam run -m mochi_codegen/cli -- init [schema_path]
 
 Creates a mochi.config.json in the current directory with default settings.
 Optionally specify the schema file path (default: schema.graphql).
 
 Examples:
-  gleam run -m mochi/cli -- init
-  gleam run -m mochi/cli -- init src/schema.graphql
+  gleam run -m mochi_codegen/cli -- init
+  gleam run -m mochi_codegen/cli -- init src/schema.graphql
 "
 }
 
@@ -690,7 +690,7 @@ fn generate_help_text() -> String {
   "mochi generate - Generate code from config
 
 Usage:
-  gleam run -m mochi/cli -- generate [options]
+  gleam run -m mochi_codegen/cli -- generate [options]
 
 Reads mochi.config.json and generates all configured outputs.
 
@@ -699,8 +699,8 @@ Options:
   --help, -h            Show this help
 
 Examples:
-  gleam run -m mochi/cli -- generate
-  gleam run -m mochi/cli -- generate --config custom.config.json
+  gleam run -m mochi_codegen/cli -- generate
+  gleam run -m mochi_codegen/cli -- generate --config custom.config.json
 "
 }
 
