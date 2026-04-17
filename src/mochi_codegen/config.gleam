@@ -175,7 +175,7 @@ import gleam/result
 /// Parse config from a YAML string
 pub fn from_yaml(input: String) -> Result(Config, String) {
   case taffy.parse(input) {
-    Error(e) -> Error("Failed to parse YAML: " <> taffy.error_message(e))
+    Error(e) -> Error("Failed to parse YAML: " <> e.message)
     Ok(doc) -> decode_config(doc)
   }
 }

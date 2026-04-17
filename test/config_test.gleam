@@ -71,7 +71,9 @@ pub fn roundtrip_default_config_test() {
         True -> Nil
         False -> panic as "SDL output (None) should roundtrip"
       }
-      case parsed.gleam.types_module_prefix == original.gleam.types_module_prefix {
+      case
+        parsed.gleam.types_module_prefix == original.gleam.types_module_prefix
+      {
         True -> Nil
         False -> panic as "types_module_prefix should roundtrip"
       }
@@ -193,10 +195,10 @@ pub fn to_yaml_omits_null_outputs_test() {
 
 pub fn schema_as_list_roundtrip_test() {
   let conf =
-    config.Config(
-      ..config.default(),
-      schema: ["graphql/user.graphql", "graphql/store.graphql"],
-    )
+    config.Config(..config.default(), schema: [
+      "graphql/user.graphql",
+      "graphql/store.graphql",
+    ])
   let yaml = config.to_yaml(conf)
   case config.from_yaml(yaml) {
     Ok(parsed) -> {

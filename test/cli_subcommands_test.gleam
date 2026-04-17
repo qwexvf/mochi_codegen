@@ -58,10 +58,9 @@ pub fn init_with_custom_schema_path_test() {
 pub fn generate_with_missing_schema_fails_test() {
   let config_path = "/tmp/mochi_cli_test_gen.json"
   let conf =
-    config.Config(
-      ..config.default(),
-      schema: ["/tmp/mochi_nonexistent_schema.graphql"],
-    )
+    config.Config(..config.default(), schema: [
+      "/tmp/mochi_nonexistent_schema.graphql",
+    ])
   let _ = config.write_to(conf, config_path)
 
   let result = cli.run_with_args(["generate", "--config", config_path])
