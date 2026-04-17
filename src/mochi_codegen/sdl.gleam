@@ -1,4 +1,4 @@
-// mochi/codegen/sdl.gleam
+// mochi_codegen/sdl.gleam
 // Generate GraphQL SDL (Schema Definition Language) from mochi schemas
 //
 // Usage:

@@ -1,4 +1,4 @@
-// Tests for mochi/codegen/gleam.gleam - Gleam code generation from GraphQL SDL
+// Tests for mochi_codegen/gleam.gleam - Gleam code generation from GraphQL SDL
 import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should

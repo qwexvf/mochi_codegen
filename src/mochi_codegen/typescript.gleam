@@ -1,4 +1,4 @@
-// mochi/codegen/typescript.gleam
+// mochi_codegen/typescript.gleam
 // Generate TypeScript type definitions from mochi GraphQL schemas
 //
 // Usage:

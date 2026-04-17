@@ -1,4 +1,4 @@
-// mochi/config.gleam
+// mochi_codegen/config.gleam
 // Project configuration for mochi code generation
 //
 // Config file: mochi.config.json
@@ -169,7 +169,7 @@ pub fn read_from(path: String) -> Result(Config, String) {
       Error(
         "Could not read "
         <> path
-        <> ". Run `gleam run -m mochi/cli -- init` to create one.",
+        <> ". Run `gleam run -m mochi_codegen/cli -- init` to create one.",
       )
   }
 }

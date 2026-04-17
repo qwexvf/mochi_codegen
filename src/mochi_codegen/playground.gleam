@@ -1,4 +1,4 @@
-// mochi/playground.gleam
+// mochi_codegen/playground.gleam
 // GraphiQL and GraphQL Playground HTML generators
 
 // ============================================================================

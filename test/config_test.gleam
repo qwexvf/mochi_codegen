@@ -1,4 +1,4 @@
-// Tests for mochi/config.gleam
+// Tests for mochi_codegen/config.gleam
 
 import gleam/option.{None, Some}
 import gleam/string
