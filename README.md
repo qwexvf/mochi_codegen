@@ -4,8 +4,10 @@ Code generation (TypeScript types, GraphQL SDL, Gleam types) and CLI for mochi G
 
 ## Installation
 
-```sh
-gleam add mochi_codegen
+```toml
+# gleam.toml
+[dependencies]
+mochi_codegen = { git = "https://github.com/qwexvf/mochi_codegen", ref = "main" }
 ```
 
 ## CLI
@@ -20,8 +22,8 @@ gleam run -m mochi_codegen/cli -- generate   # generate from config
 ```gleam
 import mochi_codegen
 
-let ts  = mochi_codegen.to_typescript(schema)
-let sdl = mochi_codegen.to_sdl(schema)
+let ts   = mochi_codegen.to_typescript(schema)
+let sdl  = mochi_codegen.to_sdl(schema)
 let html = mochi_codegen.graphiql("/graphql")
 ```
 
