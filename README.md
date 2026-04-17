@@ -1,3 +1,6 @@
+> **Active development** — breaking changes may be pushed to `main` at any time.
+> Built with the help of [Claude Code](https://claude.ai/code).
+
 # mochi_codegen
 
 Code generation (TypeScript types, GraphQL SDL, Gleam types) and CLI for mochi GraphQL.
@@ -42,8 +45,4 @@ let html = mochi_codegen.graphiql("/graphql")
 ## License
 
 Apache-2.0
----
-
-> **Active development** — APIs may change between releases.
-
 Built with the help of [Claude Code](https://claude.ai/code).
