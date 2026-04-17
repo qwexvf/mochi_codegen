@@ -1,19 +1,3 @@
-// mochi_codegen/cli.gleam
-// CLI for generating code from GraphQL schemas
-//
-// Usage:
-//   gleam run -m mochi_codegen/cli -- init                           Create mochi.config.json
-//   gleam run -m mochi_codegen/cli -- generate                       Generate from config
-//   gleam run -m mochi_codegen/cli -- <schema.graphql> [...] [opts]  Direct mode
-//
-// Options (direct mode):
-//   --typescript, -t <path>   TypeScript output (file or dir/)
-//   --gleam, -g <path>        Gleam types output (file or dir/)
-//   --resolvers, -r <path>    Gleam resolver stubs (file or dir/)
-//   --sdl, -s <file>          Normalised SDL output
-//   --all, -a <prefix>        Generate all files with prefix
-//   --help, -h                Show help
-
 import gleam/int
 import gleam/io
 import gleam/list
@@ -30,6 +14,19 @@ import mochi_codegen/typescript
 import simplifile
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+
+/// Controls when an output file is (re)written.
+pub type WritePolicy {
+  /// Always write (SDL output, TypeScript).
+  AlwaysWrite
+  /// Write only when the generated content differs from the existing file.
+  /// Used for type files — always up to date with the schema.
+  OnlyIfChanged
+  /// Never overwrite existing files. For new files, write in full.
+  /// For existing files, append only stub functions not already present.
+  /// Used for resolver files — developer-owned.
+  MergeNewFunctions
+}
 
 pub type CliConfig {
   CliConfig(
@@ -130,6 +127,7 @@ fn run_generate(args: List(String)) -> Result(String, CliError) {
       let gleam_config =
         gleam_gen.GleamGenConfig(
           types_module: conf.gleam.types_module_prefix,
+          type_suffix: conf.gleam.type_suffix,
           resolvers_module: conf.gleam.resolvers_module_prefix,
           generate_resolvers: True,
           resolver_imports: conf.gleam.resolver_imports,
@@ -162,10 +160,10 @@ fn run_direct(args: List(String)) -> Result(String, CliError) {
 
   let output =
     config.OutputConfig(
-      typescript: option_of(cli_config.typescript_output),
-      gleam_types: option_of(cli_config.gleam_output),
-      resolvers: option_of(cli_config.resolvers_output),
-      sdl: option_of(cli_config.sdl_output),
+      typescript: option.from_result(cli_config.typescript_output),
+      gleam_types: option.from_result(cli_config.gleam_output),
+      resolvers: option.from_result(cli_config.resolvers_output),
+      sdl: option.from_result(cli_config.sdl_output),
     )
 
   use messages <- result.try(generate_from_paths(
@@ -197,9 +195,17 @@ fn generate_from_paths(
 ) -> Result(List(String), CliError) {
   use merged <- result.try(read_and_merge_schemas(paths))
 
+  // Build type→module registry: for each source file, map each defined type
+  // name to the full module path it will be generated into.
+  use type_registry <- result.try(build_type_registry(
+    paths,
+    gleam_config.types_module,
+    type_suffix,
+  ))
+
   let messages = []
 
-  // TypeScript — always single file
+  // TypeScript — always overwrite (generated artifact)
   use messages <- result.try(case output.typescript {
     None -> Ok(messages)
     Some(path) ->
@@ -211,48 +217,71 @@ fn generate_from_paths(
         type_suffix <> ".ts",
         messages,
         "Generated TypeScript",
+        OnlyIfChanged,
       )
   })
 
-  // Gleam types — file or directory
+  // Gleam types — overwrite only when content changed (generated artifact)
   use messages <- result.try(case output.gleam_types {
     None -> Ok(messages)
     Some(path) ->
-      write_single_or_dir(
+      write_single_or_dir_mapped(
         path,
         paths,
         merged,
         fn(doc) { gleam_gen.generate_types(doc, gleam_config) },
+        fn(src_path) {
+          let current_module =
+            gleam_config.types_module
+            <> "/"
+            <> schema_stem(src_path)
+            <> type_suffix
+          let filtered_registry =
+            list.filter(type_registry, fn(pair) { pair.1 != current_module })
+          fn(doc) {
+            gleam_gen.generate_types_with_registry(
+              doc,
+              gleam_config,
+              filtered_registry,
+            )
+          }
+        },
         type_suffix <> ".gleam",
         messages,
         "Generated Gleam types",
+        OnlyIfChanged,
       )
   })
 
-  // Gleam resolvers — file or directory
+  // Gleam resolvers — only create if file doesn't exist (developer-owned)
   use messages <- result.try(case output.resolvers {
     None -> Ok(messages)
     Some(path) -> {
-      let types_prefix = gleam_config.types_module
       write_single_or_dir_mapped(
         path,
         paths,
         merged,
         fn(doc) { gleam_gen.generate_resolvers(doc, gleam_config) },
         fn(src_path) {
-          let types_import =
-            types_prefix <> "/" <> schema_stem(src_path) <> type_suffix
+          let current_module =
+            gleam_config.types_module
+            <> "/"
+            <> schema_stem(src_path)
+            <> type_suffix
+          let filtered_registry =
+            list.filter(type_registry, fn(pair) { pair.1 != current_module })
           fn(doc) {
-            gleam_gen.generate_resolvers_with_types(
+            gleam_gen.generate_resolvers_with_registry(
               doc,
               gleam_config,
-              types_import,
+              filtered_registry,
             )
           }
         },
         resolver_suffix <> ".gleam",
         messages,
         "Generated resolvers",
+        MergeNewFunctions,
       )
     }
   })
@@ -278,11 +307,20 @@ fn write_single_or_dir(
   suffix: String,
   messages: List(String),
   label: String,
+  policy: WritePolicy,
 ) -> Result(List(String), CliError) {
   case config.is_dir_output(output_path) {
     False -> {
-      use _ <- result.try(write_file(output_path, generate(merged)))
-      Ok([label <> ": " <> output_path, ..messages])
+      use written <- result.try(write_with_policy(
+        output_path,
+        generate(merged),
+        policy,
+      ))
+      let msg = case written {
+        True -> label <> ": " <> output_path
+        False -> label <> " (up to date): " <> output_path
+      }
+      Ok([msg, ..messages])
     }
     True -> {
       use msgs <- result.try(
@@ -291,8 +329,16 @@ fn write_single_or_dir(
           let filename = schema_filename(src_path, suffix)
           let out_path = output_path <> filename
           use _ <- result.try(ensure_dir(output_path))
-          use _ <- result.try(write_file(out_path, generate(doc)))
-          Ok([label <> ": " <> out_path, ..msgs])
+          use written <- result.try(write_with_policy(
+            out_path,
+            generate(doc),
+            policy,
+          ))
+          let msg = case written {
+            True -> label <> ": " <> out_path
+            False -> label <> " (up to date): " <> out_path
+          }
+          Ok([msg, ..msgs])
         }),
       )
       Ok(msgs)
@@ -326,11 +372,20 @@ fn write_single_or_dir_mapped(
   suffix: String,
   messages: List(String),
   label: String,
+  policy: WritePolicy,
 ) -> Result(List(String), CliError) {
   case config.is_dir_output(output_path) {
     False -> {
-      use _ <- result.try(write_file(output_path, generate_single(merged)))
-      Ok([label <> ": " <> output_path, ..messages])
+      use written <- result.try(write_with_policy(
+        output_path,
+        generate_single(merged),
+        policy,
+      ))
+      let msg = case written {
+        True -> label <> ": " <> output_path
+        False -> label <> " (up to date): " <> output_path
+      }
+      Ok([msg, ..messages])
     }
     True -> {
       use msgs <- result.try(
@@ -339,11 +394,16 @@ fn write_single_or_dir_mapped(
           let filename = schema_filename(src_path, suffix)
           let out_path = output_path <> filename
           use _ <- result.try(ensure_dir(output_path))
-          use _ <- result.try(write_file(
+          use written <- result.try(write_with_policy(
             out_path,
             make_generator(src_path)(doc),
+            policy,
           ))
-          Ok([label <> ": " <> out_path, ..msgs])
+          let msg = case written {
+            True -> label <> ": " <> out_path
+            False -> label <> " (up to date): " <> out_path
+          }
+          Ok([msg, ..msgs])
         }),
       )
       Ok(msgs)
@@ -398,9 +458,7 @@ pub fn read_and_merge_schemas(
 fn read_and_parse_schema(path: String) -> Result(SDLDocument, CliError) {
   use content <- result.try(
     simplifile.read(path)
-    |> result.map_error(fn(e) {
-      FileReadError(path, simplifile_error_to_string(e))
-    }),
+    |> result.map_error(fn(_) { FileReadError(path, "File system error") }),
   )
   sdl_parser.parse_sdl(content)
   |> result.map_error(fn(e) { ParseError(format_parse_error(e)) })
@@ -494,23 +552,118 @@ fn parse_options_loop(
   }
 }
 
-// ── file helpers ──────────────────────────────────────────────────────────────
+// ── type registry ─────────────────────────────────────────────────────────────
 
-fn option_of(r: Result(a, e)) -> option.Option(a) {
-  case r {
-    Ok(v) -> Some(v)
-    Error(_) -> None
-  }
+/// Build a registry mapping every GraphQL type name to the Gleam module path
+/// it will be generated into. Used for cross-file imports in directory mode.
+fn build_type_registry(
+  paths: List(String),
+  types_module: String,
+  type_suffix: String,
+) -> Result(List(#(String, String)), CliError) {
+  list.try_map(paths, fn(path) {
+    use doc <- result.try(read_and_parse_schema(path))
+    let module = types_module <> "/" <> schema_stem(path) <> type_suffix
+    Ok(
+      list.map(gleam_gen.collect_defined_names(doc), fn(name) {
+        #(name, module)
+      }),
+    )
+  })
+  |> result.map(list.flatten)
 }
+
+// ── file helpers ──────────────────────────────────────────────────────────────
 
 fn ensure_dir(path: String) -> Result(Nil, CliError) {
   simplifile.create_directory_all(path)
-  |> result.map_error(fn(e) { WriteError(path, simplifile_error_to_string(e)) })
+  |> result.map_error(fn(_) { WriteError(path, "File system error") })
 }
 
 fn write_file(path: String, content: String) -> Result(Nil, CliError) {
   simplifile.write(path, content)
-  |> result.map_error(fn(e) { WriteError(path, simplifile_error_to_string(e)) })
+  |> result.map_error(fn(_) { WriteError(path, "File system error") })
+}
+
+/// Write according to policy. Returns Ok(True) if the file was written, Ok(False) if skipped.
+fn write_with_policy(
+  path: String,
+  content: String,
+  policy: WritePolicy,
+) -> Result(Bool, CliError) {
+  case policy {
+    AlwaysWrite -> {
+      use _ <- result.try(write_file(path, content))
+      Ok(True)
+    }
+    OnlyIfChanged -> {
+      let existing = simplifile.read(path)
+      case existing {
+        Ok(current) if current == content -> Ok(False)
+        _ -> {
+          use _ <- result.try(write_file(path, content))
+          Ok(True)
+        }
+      }
+    }
+    MergeNewFunctions -> {
+      case simplifile.read(path) {
+        Error(_) -> {
+          use _ <- result.try(write_file(path, content))
+          Ok(True)
+        }
+        Ok(existing) -> {
+          let additions = new_function_stubs(existing, content)
+          case additions {
+            "" -> Ok(False)
+            _ -> {
+              use _ <- result.try(write_file(path, existing <> additions))
+              Ok(True)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+fn new_function_stubs(existing: String, generated: String) -> String {
+  let blocks = extract_pub_fn_blocks(generated)
+  blocks
+  |> list.filter(fn(block) {
+    let name = fn_name_from_block(block)
+    !string.contains(existing, "pub fn " <> name)
+  })
+  |> string.join("\n\n")
+  |> fn(s) {
+    case s {
+      "" -> ""
+      _ -> "\n\n" <> s
+    }
+  }
+}
+
+fn extract_pub_fn_blocks(src: String) -> List(String) {
+  let parts = string.split(src, "\npub fn ")
+  case parts {
+    [] | [_] -> []
+    [_, ..rest] ->
+      list.map(rest, fn(part) { "pub fn " <> part })
+      |> list.map(fn(block) {
+        case string.split(block, "\npub fn ") {
+          [first, ..] -> string.trim_end(first)
+          [] -> block
+        }
+      })
+  }
+}
+
+fn fn_name_from_block(block: String) -> String {
+  block
+  |> string.drop_start(string.length("pub fn "))
+  |> string.split("(")
+  |> list.first
+  |> result.unwrap("")
 }
 
 // ── code generators ───────────────────────────────────────────────────────────
@@ -748,10 +901,6 @@ fn format_parse_error(err: sdl_parser.SDLParseError) -> String {
     sdl_parser.InvalidTypeDefinition(msg, pos) ->
       "Invalid type at line " <> int.to_string(pos.line) <> ": " <> msg
   }
-}
-
-fn simplifile_error_to_string(_err) -> String {
-  "File system error"
 }
 
 // ── help text ─────────────────────────────────────────────────────────────────
