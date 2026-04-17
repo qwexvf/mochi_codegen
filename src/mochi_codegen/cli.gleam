@@ -87,8 +87,7 @@ fn run_init(args: List(String)) -> Result(String, CliError) {
           ))
         False -> {
           let conf = case args {
-            [pattern] ->
-              config.Config(..config.default(), schema: [pattern])
+            [pattern] -> config.Config(..config.default(), schema: [pattern])
             _ -> config.default()
           }
           case config.write(conf) {
@@ -244,7 +243,11 @@ fn generate_from_paths(
           let types_import =
             types_prefix <> "/" <> schema_stem(src_path) <> type_suffix
           fn(doc) {
-            gleam_gen.generate_resolvers_with_types(doc, gleam_config, types_import)
+            gleam_gen.generate_resolvers_with_types(
+              doc,
+              gleam_config,
+              types_import,
+            )
           }
         },
         resolver_suffix <> ".gleam",
@@ -282,18 +285,16 @@ fn write_single_or_dir(
       Ok([label <> ": " <> output_path, ..messages])
     }
     True -> {
-      use msgs <- result.try(list.try_fold(
-        source_paths,
-        messages,
-        fn(msgs, src_path) {
+      use msgs <- result.try(
+        list.try_fold(source_paths, messages, fn(msgs, src_path) {
           use doc <- result.try(read_and_parse_schema(src_path))
           let filename = schema_filename(src_path, suffix)
           let out_path = output_path <> filename
           use _ <- result.try(ensure_dir(output_path))
           use _ <- result.try(write_file(out_path, generate(doc)))
           Ok([label <> ": " <> out_path, ..msgs])
-        },
-      ))
+        }),
+      )
       Ok(msgs)
     }
   }
@@ -332,18 +333,19 @@ fn write_single_or_dir_mapped(
       Ok([label <> ": " <> output_path, ..messages])
     }
     True -> {
-      use msgs <- result.try(list.try_fold(
-        source_paths,
-        messages,
-        fn(msgs, src_path) {
+      use msgs <- result.try(
+        list.try_fold(source_paths, messages, fn(msgs, src_path) {
           use doc <- result.try(read_and_parse_schema(src_path))
           let filename = schema_filename(src_path, suffix)
           let out_path = output_path <> filename
           use _ <- result.try(ensure_dir(output_path))
-          use _ <- result.try(write_file(out_path, make_generator(src_path)(doc)))
+          use _ <- result.try(write_file(
+            out_path,
+            make_generator(src_path)(doc),
+          ))
           Ok([label <> ": " <> out_path, ..msgs])
-        },
-      ))
+        }),
+      )
       Ok(msgs)
     }
   }
@@ -396,7 +398,9 @@ pub fn read_and_merge_schemas(
 fn read_and_parse_schema(path: String) -> Result(SDLDocument, CliError) {
   use content <- result.try(
     simplifile.read(path)
-    |> result.map_error(fn(e) { FileReadError(path, simplifile_error_to_string(e)) }),
+    |> result.map_error(fn(e) {
+      FileReadError(path, simplifile_error_to_string(e))
+    }),
   )
   sdl_parser.parse_sdl(content)
   |> result.map_error(fn(e) { ParseError(format_parse_error(e)) })
@@ -653,7 +657,12 @@ fn object_to_sdl(obj: sdl_ast.ObjectTypeDef) -> String {
 
 fn interface_to_sdl(iface: sdl_ast.InterfaceTypeDef) -> String {
   let fields = iface.fields |> list.map(field_to_sdl) |> string.join("\n")
-  opt_desc(iface.description) <> "interface " <> iface.name <> " {\n" <> fields <> "\n}"
+  opt_desc(iface.description)
+  <> "interface "
+  <> iface.name
+  <> " {\n"
+  <> fields
+  <> "\n}"
 }
 
 fn field_to_sdl(f: sdl_ast.FieldDef) -> String {
@@ -684,7 +693,9 @@ fn enum_to_sdl(e: sdl_ast.EnumTypeDef) -> String {
 fn input_to_sdl(i: sdl_ast.InputObjectTypeDef) -> String {
   let fields =
     i.fields
-    |> list.map(fn(f) { "  " <> f.name <> ": " <> sdl_type_to_string(f.field_type) })
+    |> list.map(fn(f) {
+      "  " <> f.name <> ": " <> sdl_type_to_string(f.field_type)
+    })
     |> string.join("\n")
   opt_desc(i.description) <> "input " <> i.name <> " {\n" <> fields <> "\n}"
 }
@@ -728,7 +739,10 @@ fn format_parse_error(err: sdl_parser.SDLParseError) -> String {
   case err {
     sdl_parser.SDLLexError(_) -> "Lexer error"
     sdl_parser.UnexpectedToken(expected, _, pos) ->
-      "Unexpected token at line " <> int.to_string(pos.line) <> ", expected " <> expected
+      "Unexpected token at line "
+      <> int.to_string(pos.line)
+      <> ", expected "
+      <> expected
     sdl_parser.UnexpectedEOF(expected) ->
       "Unexpected end of file, expected " <> expected
     sdl_parser.InvalidTypeDefinition(msg, pos) ->

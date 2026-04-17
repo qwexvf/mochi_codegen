@@ -94,7 +94,12 @@ pub fn generate_simple_object_type_test() {
 pub fn generate_object_with_list_field_test() {
   let user_type =
     make_object("User", [
-      make_field("tags", sdl_ast.NonNullType(sdl_ast.ListType(sdl_ast.NonNullType(sdl_ast.NamedType("String"))))),
+      make_field(
+        "tags",
+        sdl_ast.NonNullType(
+          sdl_ast.ListType(sdl_ast.NonNullType(sdl_ast.NamedType("String"))),
+        ),
+      ),
     ])
 
   let doc =
@@ -455,7 +460,13 @@ pub fn generate_nested_list_type_test() {
     make_object("Matrix", [
       make_field(
         "rows",
-        sdl_ast.NonNullType(sdl_ast.ListType(sdl_ast.NonNullType(sdl_ast.ListType(sdl_ast.NonNullType(sdl_ast.NamedType("Int")))))),
+        sdl_ast.NonNullType(
+          sdl_ast.ListType(
+            sdl_ast.NonNullType(
+              sdl_ast.ListType(sdl_ast.NonNullType(sdl_ast.NamedType("Int"))),
+            ),
+          ),
+        ),
       ),
     ])
 
@@ -542,7 +553,10 @@ pub fn generate_camel_case_to_snake_case_test() {
     make_object("User", [
       make_field("firstName", sdl_ast.NonNullType(sdl_ast.NamedType("String"))),
       make_field("lastName", sdl_ast.NonNullType(sdl_ast.NamedType("String"))),
-      make_field("emailAddress", sdl_ast.NonNullType(sdl_ast.NamedType("String"))),
+      make_field(
+        "emailAddress",
+        sdl_ast.NonNullType(sdl_ast.NamedType("String")),
+      ),
     ])
 
   let doc =

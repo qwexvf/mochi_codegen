@@ -333,9 +333,9 @@ fn scalar_to_gleam(name: String) -> String {
 // String utilities
 
 const gleam_keywords = [
-  "as", "assert", "auto", "case", "const", "delegate", "derive", "echo",
-  "else", "fn", "if", "implement", "import", "in", "let", "macro", "opaque",
-  "panic", "pub", "test", "todo", "type", "use",
+  "as", "assert", "auto", "case", "const", "delegate", "derive", "echo", "else",
+  "fn", "if", "implement", "import", "in", "let", "macro", "opaque", "panic",
+  "pub", "test", "todo", "type", "use",
 ]
 
 fn to_snake_case(input: String) -> String {
