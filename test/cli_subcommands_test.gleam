@@ -21,7 +21,7 @@ pub fn init_creates_config_file_test() {
 
   case config.read_from(config_path) {
     Ok(parsed) -> {
-      case parsed.schema == "schema.graphql" {
+      case parsed.schema == ["schema.graphql"] {
         True -> Nil
         False -> panic as "Init config should have default schema path"
       }
@@ -35,7 +35,7 @@ pub fn init_creates_config_file_test() {
 
 pub fn init_with_custom_schema_path_test() {
   let path = "/tmp/mochi_cli_test_custom.json"
-  let conf = config.Config(..config.default(), schema: "src/api.graphql")
+  let conf = config.Config(..config.default(), schema: ["src/api.graphql"])
   case config.write_to(conf, path) {
     Ok(_) -> Nil
     Error(msg) -> panic as { "Write failed: " <> msg }
@@ -44,7 +44,7 @@ pub fn init_with_custom_schema_path_test() {
   case config.read_from(path) {
     Ok(parsed) -> {
       case parsed.schema {
-        "src/api.graphql" -> Nil
+        ["src/api.graphql"] -> Nil
         _ -> panic as "Schema path should be custom value"
       }
     }
@@ -60,7 +60,7 @@ pub fn generate_with_missing_schema_fails_test() {
   let conf =
     config.Config(
       ..config.default(),
-      schema: "/tmp/mochi_nonexistent_schema.graphql",
+      schema: ["/tmp/mochi_nonexistent_schema.graphql"],
     )
   let _ = config.write_to(conf, config_path)
 
@@ -92,7 +92,7 @@ pub fn generate_with_valid_schema_succeeds_test() {
 
   let conf =
     config.Config(
-      schema: schema_path,
+      schema: [schema_path],
       output: config.OutputConfig(
         typescript: option.Some(ts_path),
         gleam_types: option.None,
@@ -100,8 +100,11 @@ pub fn generate_with_valid_schema_succeeds_test() {
         sdl: option.None,
       ),
       gleam: config.GleamConfig(
-        types_module: "types",
-        resolvers_module: "resolvers",
+        types_module_prefix: "types",
+        resolvers_module_prefix: "resolvers",
+        type_suffix: "_types",
+        resolver_suffix: "_resolvers",
+        resolver_imports: [],
         generate_docs: True,
       ),
     )

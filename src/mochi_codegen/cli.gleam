@@ -2,25 +2,26 @@
 // CLI for generating code from GraphQL schemas
 //
 // Usage:
-//   gleam run -m mochi_codegen/cli -- init                     Create mochi.config.json
-//   gleam run -m mochi_codegen/cli -- generate                 Generate from config
-//   gleam run -m mochi_codegen/cli -- <schema.graphql> [opts]  Direct mode
+//   gleam run -m mochi_codegen/cli -- init                           Create mochi.config.json
+//   gleam run -m mochi_codegen/cli -- generate                       Generate from config
+//   gleam run -m mochi_codegen/cli -- <schema.graphql> [...] [opts]  Direct mode
 //
 // Options (direct mode):
-//   --typescript, -t <file>   Generate TypeScript types
-//   --gleam, -g <file>        Generate Gleam types
-//   --resolvers, -r <file>    Generate resolver stubs
-//   --sdl, -s <file>          Generate SDL (normalized)
+//   --typescript, -t <path>   TypeScript output (file or dir/)
+//   --gleam, -g <path>        Gleam types output (file or dir/)
+//   --resolvers, -r <path>    Gleam resolver stubs (file or dir/)
+//   --sdl, -s <file>          Normalised SDL output
 //   --all, -a <prefix>        Generate all files with prefix
 //   --help, -h                Show help
 
+import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
 import mochi/schema.{type Schema}
-import mochi/sdl_ast.{type SDLDocument}
+import mochi/sdl_ast.{type SDLDocument, SDLDocument}
 import mochi/sdl_parser
 import mochi_codegen/config
 import mochi_codegen/gleam as gleam_gen
@@ -28,10 +29,11 @@ import mochi_codegen/sdl
 import mochi_codegen/typescript
 import simplifile
 
-/// CLI configuration
+// ── Types ─────────────────────────────────────────────────────────────────────
+
 pub type CliConfig {
   CliConfig(
-    schema_path: String,
+    schema_paths: List(String),
     typescript_output: Result(String, Nil),
     gleam_output: Result(String, Nil),
     resolvers_output: Result(String, Nil),
@@ -39,7 +41,6 @@ pub type CliConfig {
   )
 }
 
-/// CLI errors
 pub type CliError {
   NoSchemaFile
   FileReadError(path: String, reason: String)
@@ -48,7 +49,8 @@ pub type CliError {
   InvalidArgs(message: String)
 }
 
-/// Main entry point
+// ── Entry points ──────────────────────────────────────────────────────────────
+
 pub fn main() {
   case run() {
     Ok(msg) -> io.println(msg)
@@ -59,13 +61,10 @@ pub fn main() {
   }
 }
 
-/// Run CLI with command line arguments
 pub fn run() -> Result(String, CliError) {
-  let args = get_args()
-  run_with_args(args)
+  run_with_args(get_args())
 }
 
-/// Run CLI with provided arguments
 pub fn run_with_args(args: List(String)) -> Result(String, CliError) {
   case args {
     ["init", ..rest] -> run_init(rest)
@@ -74,7 +73,8 @@ pub fn run_with_args(args: List(String)) -> Result(String, CliError) {
   }
 }
 
-/// `mochi init` - Create a mochi.config.json file
+// ── init ──────────────────────────────────────────────────────────────────────
+
 fn run_init(args: List(String)) -> Result(String, CliError) {
   case args {
     ["--help"] | ["-h"] -> Ok(init_help_text())
@@ -87,8 +87,8 @@ fn run_init(args: List(String)) -> Result(String, CliError) {
           ))
         False -> {
           let conf = case args {
-            [schema_path] ->
-              config.Config(..config.default(), schema: schema_path)
+            [pattern] ->
+              config.Config(..config.default(), schema: [pattern])
             _ -> config.default()
           }
           case config.write(conf) {
@@ -96,16 +96,11 @@ fn run_init(args: List(String)) -> Result(String, CliError) {
               Ok(
                 "Created "
                 <> config.config_file
-                <> "\n"
-                <> "\n"
-                <> "Next steps:\n"
+                <> "\n\nNext steps:\n"
                 <> "  1. Edit "
                 <> config.config_file
                 <> " to match your project\n"
-                <> "  2. Create your schema file: "
-                <> conf.schema
-                <> "\n"
-                <> "  3. Run: gleam run -m mochi_codegen/cli -- generate",
+                <> "  2. Run: gleam run -m mochi_codegen/cli -- generate",
               )
             Error(msg) -> Error(WriteError(config.config_file, msg))
           }
@@ -115,7 +110,8 @@ fn run_init(args: List(String)) -> Result(String, CliError) {
   }
 }
 
-/// `mochi generate` - Generate code from mochi.config.json
+// ── generate ──────────────────────────────────────────────────────────────────
+
 fn run_generate(args: List(String)) -> Result(String, CliError) {
   case args {
     ["--help"] | ["-h"] -> Ok(generate_help_text())
@@ -130,26 +126,24 @@ fn run_generate(args: List(String)) -> Result(String, CliError) {
         Error(msg) -> Error(InvalidArgs(msg))
       })
 
-      use doc <- result.try(read_and_parse_schema(conf.schema))
+      use resolved_paths <- result.try(expand_globs(conf.schema))
 
       let gleam_config =
         gleam_gen.GleamGenConfig(
-          types_module: conf.gleam.types_module,
-          resolvers_module: conf.gleam.resolvers_module,
+          types_module: conf.gleam.types_module_prefix,
+          resolvers_module: conf.gleam.resolvers_module_prefix,
           generate_resolvers: True,
+          resolver_imports: conf.gleam.resolver_imports,
           generate_docs: conf.gleam.generate_docs,
         )
 
-      let cli_config =
-        CliConfig(
-          schema_path: conf.schema,
-          typescript_output: option_to_result(conf.output.typescript),
-          gleam_output: option_to_result(conf.output.gleam_types),
-          resolvers_output: option_to_result(conf.output.resolvers),
-          sdl_output: option_to_result(conf.output.sdl),
-        )
-
-      use messages <- result.try(generate_outputs(cli_config, doc, gleam_config))
+      use messages <- result.try(generate_from_paths(
+        resolved_paths,
+        conf.output,
+        gleam_config,
+        conf.gleam.type_suffix,
+        conf.gleam.resolver_suffix,
+      ))
 
       case messages {
         [] -> Ok("No outputs configured in " <> config_path)
@@ -159,21 +153,29 @@ fn run_generate(args: List(String)) -> Result(String, CliError) {
   }
 }
 
-fn option_to_result(opt: option.Option(a)) -> Result(a, Nil) {
-  case opt {
-    Some(v) -> Ok(v)
-    None -> Error(Nil)
-  }
-}
+// ── direct mode ───────────────────────────────────────────────────────────────
 
-/// Direct mode (legacy): `mochi <schema.graphql> [options]`
 fn run_direct(args: List(String)) -> Result(String, CliError) {
   use cli_config <- result.try(parse_args(args))
-  use doc <- result.try(read_and_parse_schema(cli_config.schema_path))
+  use resolved_paths <- result.try(expand_globs(cli_config.schema_paths))
 
   let gleam_config = gleam_gen.default_config()
 
-  use messages <- result.try(generate_outputs(cli_config, doc, gleam_config))
+  let output =
+    config.OutputConfig(
+      typescript: option_of(cli_config.typescript_output),
+      gleam_types: option_of(cli_config.gleam_output),
+      resolvers: option_of(cli_config.resolvers_output),
+      sdl: option_of(cli_config.sdl_output),
+    )
+
+  use messages <- result.try(generate_from_paths(
+    resolved_paths,
+    output,
+    gleam_config,
+    "_types",
+    "_resolvers",
+  ))
 
   case messages {
     [] -> Ok("No output files specified. Use --help for usage.")
@@ -181,104 +183,301 @@ fn run_direct(args: List(String)) -> Result(String, CliError) {
   }
 }
 
-fn generate_outputs(
-  config: CliConfig,
-  doc: SDLDocument,
+// ── core generation ───────────────────────────────────────────────────────────
+
+/// Generate outputs from a resolved (glob-expanded) list of schema file paths.
+///
+/// For directory outputs (path ending in "/"), one file is produced per schema
+/// file. For file outputs, all schemas are merged into a single document.
+fn generate_from_paths(
+  paths: List(String),
+  output: config.OutputConfig,
   gleam_config: gleam_gen.GleamGenConfig,
+  type_suffix: String,
+  resolver_suffix: String,
 ) -> Result(List(String), CliError) {
+  use merged <- result.try(read_and_merge_schemas(paths))
+
   let messages = []
 
-  // Generate TypeScript
-  use messages <- result.try(case config.typescript_output {
-    Ok(path) -> {
-      let content = generate_typescript_from_sdl(doc)
-      use _ <- result.try(write_file(path, content))
-      Ok(["Generated TypeScript: " <> path, ..messages])
-    }
-    Error(_) -> Ok(messages)
+  // TypeScript — always single file
+  use messages <- result.try(case output.typescript {
+    None -> Ok(messages)
+    Some(path) ->
+      write_single_or_dir(
+        path,
+        paths,
+        merged,
+        generate_typescript_from_sdl,
+        type_suffix <> ".ts",
+        messages,
+        "Generated TypeScript",
+      )
   })
 
-  // Generate Gleam types
-  use messages <- result.try(case config.gleam_output {
-    Ok(path) -> {
-      let content = gleam_gen.generate_types(doc, gleam_config)
-      use _ <- result.try(write_file(path, content))
-      Ok(["Generated Gleam types: " <> path, ..messages])
-    }
-    Error(_) -> Ok(messages)
+  // Gleam types — file or directory
+  use messages <- result.try(case output.gleam_types {
+    None -> Ok(messages)
+    Some(path) ->
+      write_single_or_dir(
+        path,
+        paths,
+        merged,
+        fn(doc) { gleam_gen.generate_types(doc, gleam_config) },
+        type_suffix <> ".gleam",
+        messages,
+        "Generated Gleam types",
+      )
   })
 
-  // Generate resolver stubs
-  use messages <- result.try(case config.resolvers_output {
-    Ok(path) -> {
-      let content = gleam_gen.generate_resolvers(doc, gleam_config)
-      use _ <- result.try(write_file(path, content))
-      Ok(["Generated resolvers: " <> path, ..messages])
+  // Gleam resolvers — file or directory
+  use messages <- result.try(case output.resolvers {
+    None -> Ok(messages)
+    Some(path) -> {
+      let types_prefix = gleam_config.types_module
+      write_single_or_dir_mapped(
+        path,
+        paths,
+        merged,
+        fn(doc) { gleam_gen.generate_resolvers(doc, gleam_config) },
+        fn(src_path) {
+          let types_import =
+            types_prefix <> "/" <> schema_stem(src_path) <> type_suffix
+          fn(doc) {
+            gleam_gen.generate_resolvers_with_types(doc, gleam_config, types_import)
+          }
+        },
+        resolver_suffix <> ".gleam",
+        messages,
+        "Generated resolvers",
+      )
     }
-    Error(_) -> Ok(messages)
   })
 
-  // Generate SDL
-  use messages <- result.try(case config.sdl_output {
-    Ok(path) -> {
-      let content = generate_sdl_from_sdl(doc)
-      use _ <- result.try(write_file(path, content))
+  // SDL — always single file (merging makes sense here)
+  use messages <- result.try(case output.sdl {
+    None -> Ok(messages)
+    Some(path) -> {
+      use _ <- result.try(write_file(path, generate_sdl_from_sdl(merged)))
       Ok(["Generated SDL: " <> path, ..messages])
     }
-    Error(_) -> Ok(messages)
   })
 
   Ok(messages)
 }
 
-/// Parse command line arguments
-fn parse_args(args: List(String)) -> Result(CliConfig, CliError) {
-  case args {
-    [] -> Error(InvalidArgs(help_text()))
-    ["--help"] | ["-h"] -> Error(InvalidArgs(help_text()))
-    [schema_path, ..rest] -> parse_options(schema_path, rest)
+/// Write output either as a single merged file or as per-schema files in a directory.
+fn write_single_or_dir(
+  output_path: String,
+  source_paths: List(String),
+  merged: SDLDocument,
+  generate: fn(SDLDocument) -> String,
+  suffix: String,
+  messages: List(String),
+  label: String,
+) -> Result(List(String), CliError) {
+  case config.is_dir_output(output_path) {
+    False -> {
+      use _ <- result.try(write_file(output_path, generate(merged)))
+      Ok([label <> ": " <> output_path, ..messages])
+    }
+    True -> {
+      use msgs <- result.try(list.try_fold(
+        source_paths,
+        messages,
+        fn(msgs, src_path) {
+          use doc <- result.try(read_and_parse_schema(src_path))
+          let filename = schema_filename(src_path, suffix)
+          let out_path = output_path <> filename
+          use _ <- result.try(ensure_dir(output_path))
+          use _ <- result.try(write_file(out_path, generate(doc)))
+          Ok([label <> ": " <> out_path, ..msgs])
+        },
+      ))
+      Ok(msgs)
+    }
   }
 }
 
-fn parse_options(
-  schema_path: String,
-  options: List(String),
-) -> Result(CliConfig, CliError) {
-  let config =
-    CliConfig(
-      schema_path: schema_path,
-      typescript_output: Error(Nil),
-      gleam_output: Error(Nil),
-      resolvers_output: Error(Nil),
-      sdl_output: Error(Nil),
-    )
+/// Extract the stem from a schema path: "graphql/user.graphql" → "user"
+fn schema_stem(schema_path: String) -> String {
+  schema_path
+  |> string.split("/")
+  |> list.last
+  |> result.unwrap(schema_path)
+  |> string.split(".")
+  |> list.first
+  |> result.unwrap(schema_path)
+}
 
-  parse_options_loop(config, options)
+/// Derive output filename from schema path: "graphql/user.graphql" → "user<suffix>"
+fn schema_filename(schema_path: String, suffix: String) -> String {
+  schema_stem(schema_path) <> suffix
+}
+
+/// Like write_single_or_dir but accepts a per-file generator factory for directory mode.
+fn write_single_or_dir_mapped(
+  output_path: String,
+  source_paths: List(String),
+  merged: SDLDocument,
+  generate_single: fn(SDLDocument) -> String,
+  make_generator: fn(String) -> fn(SDLDocument) -> String,
+  suffix: String,
+  messages: List(String),
+  label: String,
+) -> Result(List(String), CliError) {
+  case config.is_dir_output(output_path) {
+    False -> {
+      use _ <- result.try(write_file(output_path, generate_single(merged)))
+      Ok([label <> ": " <> output_path, ..messages])
+    }
+    True -> {
+      use msgs <- result.try(list.try_fold(
+        source_paths,
+        messages,
+        fn(msgs, src_path) {
+          use doc <- result.try(read_and_parse_schema(src_path))
+          let filename = schema_filename(src_path, suffix)
+          let out_path = output_path <> filename
+          use _ <- result.try(ensure_dir(output_path))
+          use _ <- result.try(write_file(out_path, make_generator(src_path)(doc)))
+          Ok([label <> ": " <> out_path, ..msgs])
+        },
+      ))
+      Ok(msgs)
+    }
+  }
+}
+
+// ── glob expansion ────────────────────────────────────────────────────────────
+
+/// Expand a list of glob patterns / literal paths into concrete file paths.
+pub fn expand_globs(patterns: List(String)) -> Result(List(String), CliError) {
+  case patterns {
+    [] -> Error(NoSchemaFile)
+    _ -> {
+      let paths =
+        patterns
+        |> list.flat_map(fn(p) {
+          case glob(p) {
+            [] -> [p]
+            matched -> matched
+          }
+        })
+        |> list.unique
+      case paths {
+        [] -> Error(NoSchemaFile)
+        _ -> Ok(paths)
+      }
+    }
+  }
+}
+
+@external(erlang, "mochi_codegen_ffi", "glob")
+fn glob(pattern: String) -> List(String)
+
+// ── schema reading ────────────────────────────────────────────────────────────
+
+/// Read and merge multiple schema files into one document.
+pub fn read_and_merge_schemas(
+  paths: List(String),
+) -> Result(SDLDocument, CliError) {
+  case paths {
+    [] -> Error(NoSchemaFile)
+    _ ->
+      paths
+      |> list.try_map(read_and_parse_schema)
+      |> result.map(fn(docs) {
+        SDLDocument(definitions: list.flat_map(docs, fn(d) { d.definitions }))
+      })
+  }
+}
+
+fn read_and_parse_schema(path: String) -> Result(SDLDocument, CliError) {
+  use content <- result.try(
+    simplifile.read(path)
+    |> result.map_error(fn(e) { FileReadError(path, simplifile_error_to_string(e)) }),
+  )
+  sdl_parser.parse_sdl(content)
+  |> result.map_error(fn(e) { ParseError(format_parse_error(e)) })
+}
+
+// ── arg parsing ───────────────────────────────────────────────────────────────
+
+fn parse_args(args: List(String)) -> Result(CliConfig, CliError) {
+  case args {
+    [] | ["--help"] | ["-h"] -> Error(InvalidArgs(help_text()))
+    _ -> collect_schema_paths(args, [])
+  }
+}
+
+fn collect_schema_paths(
+  args: List(String),
+  paths: List(String),
+) -> Result(CliConfig, CliError) {
+  case args {
+    [] ->
+      case paths {
+        [] -> Error(InvalidArgs(help_text()))
+        _ ->
+          Ok(CliConfig(
+            schema_paths: list.reverse(paths),
+            typescript_output: Error(Nil),
+            gleam_output: Error(Nil),
+            resolvers_output: Error(Nil),
+            sdl_output: Error(Nil),
+          ))
+      }
+    [arg, ..rest] -> {
+      case is_option_flag(arg) {
+        True ->
+          case paths {
+            [] -> Error(InvalidArgs("Expected a schema file before options"))
+            _ -> {
+              let base =
+                CliConfig(
+                  schema_paths: list.reverse(paths),
+                  typescript_output: Error(Nil),
+                  gleam_output: Error(Nil),
+                  resolvers_output: Error(Nil),
+                  sdl_output: Error(Nil),
+                )
+              parse_options_loop(base, [arg, ..rest])
+            }
+          }
+        False -> collect_schema_paths(rest, [arg, ..paths])
+      }
+    }
+  }
+}
+
+fn is_option_flag(s: String) -> Bool {
+  string.starts_with(s, "-")
 }
 
 fn parse_options_loop(
-  config: CliConfig,
+  cfg: CliConfig,
   options: List(String),
 ) -> Result(CliConfig, CliError) {
   case options {
-    [] -> Ok(config)
+    [] -> Ok(cfg)
 
     ["--typescript", path, ..rest] | ["-t", path, ..rest] ->
-      parse_options_loop(CliConfig(..config, typescript_output: Ok(path)), rest)
+      parse_options_loop(CliConfig(..cfg, typescript_output: Ok(path)), rest)
 
     ["--gleam", path, ..rest] | ["-g", path, ..rest] ->
-      parse_options_loop(CliConfig(..config, gleam_output: Ok(path)), rest)
+      parse_options_loop(CliConfig(..cfg, gleam_output: Ok(path)), rest)
 
     ["--resolvers", path, ..rest] | ["-r", path, ..rest] ->
-      parse_options_loop(CliConfig(..config, resolvers_output: Ok(path)), rest)
+      parse_options_loop(CliConfig(..cfg, resolvers_output: Ok(path)), rest)
 
     ["--sdl", path, ..rest] | ["-s", path, ..rest] ->
-      parse_options_loop(CliConfig(..config, sdl_output: Ok(path)), rest)
+      parse_options_loop(CliConfig(..cfg, sdl_output: Ok(path)), rest)
 
     ["--all", prefix, ..rest] | ["-a", prefix, ..rest] ->
       parse_options_loop(
         CliConfig(
-          ..config,
+          ..cfg,
           typescript_output: Ok(prefix <> ".ts"),
           gleam_output: Ok(prefix <> "_types.gleam"),
           resolvers_output: Ok(prefix <> "_resolvers.gleam"),
@@ -291,357 +490,257 @@ fn parse_options_loop(
   }
 }
 
-/// Read and parse schema file
-fn read_and_parse_schema(path: String) -> Result(SDLDocument, CliError) {
-  case simplifile.read(path) {
-    Ok(content) -> {
-      case sdl_parser.parse_sdl(content) {
-        Ok(doc) -> Ok(doc)
-        Error(e) -> Error(ParseError(format_parse_error(e)))
-      }
-    }
-    Error(e) -> Error(FileReadError(path, simplifile_error_to_string(e)))
+// ── file helpers ──────────────────────────────────────────────────────────────
+
+fn option_of(r: Result(a, e)) -> option.Option(a) {
+  case r {
+    Ok(v) -> Some(v)
+    Error(_) -> None
   }
 }
 
-/// Write content to file
+fn ensure_dir(path: String) -> Result(Nil, CliError) {
+  simplifile.create_directory_all(path)
+  |> result.map_error(fn(e) { WriteError(path, simplifile_error_to_string(e)) })
+}
+
 fn write_file(path: String, content: String) -> Result(Nil, CliError) {
-  case simplifile.write(path, content) {
-    Ok(_) -> Ok(Nil)
-    Error(e) -> Error(WriteError(path, simplifile_error_to_string(e)))
-  }
+  simplifile.write(path, content)
+  |> result.map_error(fn(e) { WriteError(path, simplifile_error_to_string(e)) })
 }
 
-// TypeScript generation from SDL (simplified - generates basic types)
+// ── code generators ───────────────────────────────────────────────────────────
+
 fn generate_typescript_from_sdl(doc: SDLDocument) -> String {
   let header = "// Generated by mochi - DO NOT EDIT\n\n"
-
-  let maybe_helper =
+  let scalars =
     "export type Maybe<T> = T | null | undefined;\n\n"
     <> "export type Scalars = {\n"
-    <> "  ID: string;\n"
-    <> "  String: string;\n"
-    <> "  Int: number;\n"
-    <> "  Float: number;\n"
-    <> "  Boolean: boolean;\n"
-    <> "};\n\n"
+    <> "  ID: string;\n  String: string;\n  Int: number;\n"
+    <> "  Float: number;\n  Boolean: boolean;\n};\n\n"
 
   let types =
     doc.definitions
     |> list.filter_map(fn(def) {
       case def {
-        sdl_ast.TypeDefinition(type_def) -> Ok(type_def_to_typescript(type_def))
+        sdl_ast.TypeDefinition(td) -> Ok(type_def_to_typescript(td))
         _ -> Error(Nil)
       }
     })
     |> string.join("\n\n")
 
-  header <> maybe_helper <> types
+  header <> scalars <> types
 }
 
-fn type_def_to_typescript(type_def: sdl_ast.TypeDef) -> String {
-  case type_def {
+fn type_def_to_typescript(td: sdl_ast.TypeDef) -> String {
+  case td {
     sdl_ast.ObjectTypeDefinition(obj) -> object_to_typescript(obj)
     sdl_ast.InterfaceTypeDefinition(iface) -> interface_to_typescript(iface)
-    sdl_ast.EnumTypeDefinition(enum) -> enum_to_typescript(enum)
-    sdl_ast.InputObjectTypeDefinition(input) -> input_to_typescript(input)
-    sdl_ast.UnionTypeDefinition(union) -> union_to_typescript(union)
-    sdl_ast.ScalarTypeDefinition(scalar) -> scalar_to_typescript(scalar)
+    sdl_ast.EnumTypeDefinition(e) -> enum_to_typescript(e)
+    sdl_ast.InputObjectTypeDefinition(i) -> input_to_typescript(i)
+    sdl_ast.UnionTypeDefinition(u) -> union_to_typescript(u)
+    sdl_ast.ScalarTypeDefinition(s) -> "export type " <> s.name <> " = string;"
   }
 }
 
 fn object_to_typescript(obj: sdl_ast.ObjectTypeDef) -> String {
-  let fields =
-    obj.fields
-    |> list.map(field_to_typescript)
-    |> string.join("\n")
-
+  let fields = obj.fields |> list.map(field_to_typescript) |> string.join("\n")
   "export interface " <> obj.name <> " {\n" <> fields <> "\n}"
 }
 
 fn interface_to_typescript(iface: sdl_ast.InterfaceTypeDef) -> String {
   let fields =
-    iface.fields
-    |> list.map(field_to_typescript)
-    |> string.join("\n")
-
+    iface.fields |> list.map(field_to_typescript) |> string.join("\n")
   "export interface " <> iface.name <> " {\n" <> fields <> "\n}"
 }
 
-fn field_to_typescript(field: sdl_ast.FieldDef) -> String {
-  let optional = case is_non_null(field.field_type) {
+fn field_to_typescript(f: sdl_ast.FieldDef) -> String {
+  let opt = case is_non_null(f.field_type) {
     True -> ""
     False -> "?"
   }
-  "  "
-  <> field.name
-  <> optional
-  <> ": "
-  <> sdl_type_to_typescript(field.field_type)
-  <> ";"
+  "  " <> f.name <> opt <> ": " <> sdl_type_to_ts(f.field_type) <> ";"
 }
 
-fn enum_to_typescript(enum: sdl_ast.EnumTypeDef) -> String {
-  let values =
-    enum.values
+fn enum_to_typescript(e: sdl_ast.EnumTypeDef) -> String {
+  let vals =
+    e.values
     |> list.map(fn(v) { "  " <> v.name <> " = \"" <> v.name <> "\"," })
     |> string.join("\n")
-
-  "export enum " <> enum.name <> " {\n" <> values <> "\n}"
+  "export enum " <> e.name <> " {\n" <> vals <> "\n}"
 }
 
-fn input_to_typescript(input: sdl_ast.InputObjectTypeDef) -> String {
+fn input_to_typescript(i: sdl_ast.InputObjectTypeDef) -> String {
   let fields =
-    input.fields
+    i.fields
     |> list.map(fn(f) {
-      let optional = case is_non_null(f.field_type) {
+      let opt = case is_non_null(f.field_type) {
         True -> ""
         False -> "?"
       }
-      "  "
-      <> f.name
-      <> optional
-      <> ": "
-      <> sdl_type_to_typescript(f.field_type)
-      <> ";"
+      "  " <> f.name <> opt <> ": " <> sdl_type_to_ts(f.field_type) <> ";"
     })
     |> string.join("\n")
-
-  "export interface " <> input.name <> " {\n" <> fields <> "\n}"
+  "export interface " <> i.name <> " {\n" <> fields <> "\n}"
 }
 
-fn union_to_typescript(union: sdl_ast.UnionTypeDef) -> String {
-  let types = string.join(union.member_types, " | ")
-  "export type " <> union.name <> " = " <> types <> ";"
+fn union_to_typescript(u: sdl_ast.UnionTypeDef) -> String {
+  "export type " <> u.name <> " = " <> string.join(u.member_types, " | ") <> ";"
 }
 
-fn scalar_to_typescript(scalar: sdl_ast.ScalarTypeDef) -> String {
-  "export type " <> scalar.name <> " = string;"
-}
-
-fn sdl_type_to_typescript(sdl_type: sdl_ast.SDLType) -> String {
-  case sdl_type {
-    sdl_ast.NamedType(name) -> scalar_to_ts_type(name)
-    sdl_ast.NonNullType(inner) -> sdl_type_to_typescript(inner)
-    sdl_ast.ListType(inner) ->
-      "Maybe<" <> sdl_type_to_typescript(inner) <> ">[]"
+fn sdl_type_to_ts(t: sdl_ast.SDLType) -> String {
+  case t {
+    sdl_ast.NamedType(name) ->
+      case name {
+        "String" -> "Scalars[\"String\"]"
+        "Int" -> "Scalars[\"Int\"]"
+        "Float" -> "Scalars[\"Float\"]"
+        "Boolean" -> "Scalars[\"Boolean\"]"
+        "ID" -> "Scalars[\"ID\"]"
+        other -> other
+      }
+    sdl_ast.NonNullType(inner) -> sdl_type_to_ts(inner)
+    sdl_ast.ListType(inner) -> "Maybe<" <> sdl_type_to_ts(inner) <> ">[]"
   }
 }
 
-fn scalar_to_ts_type(name: String) -> String {
-  case name {
-    "String" -> "Scalars[\"String\"]"
-    "Int" -> "Scalars[\"Int\"]"
-    "Float" -> "Scalars[\"Float\"]"
-    "Boolean" -> "Scalars[\"Boolean\"]"
-    "ID" -> "Scalars[\"ID\"]"
-    other -> other
-  }
-}
-
-fn is_non_null(sdl_type: sdl_ast.SDLType) -> Bool {
-  case sdl_type {
+fn is_non_null(t: sdl_ast.SDLType) -> Bool {
+  case t {
     sdl_ast.NonNullType(_) -> True
     _ -> False
   }
 }
 
-// SDL regeneration (for normalization)
 fn generate_sdl_from_sdl(doc: SDLDocument) -> String {
-  let header = "# Generated by mochi\n\n"
-
   let types =
     doc.definitions
     |> list.filter_map(fn(def) {
       case def {
-        sdl_ast.TypeDefinition(type_def) -> Ok(type_def_to_sdl(type_def))
+        sdl_ast.TypeDefinition(td) -> Ok(type_def_to_sdl(td))
         _ -> Error(Nil)
       }
     })
     |> string.join("\n\n")
-
-  header <> types
+  "# Generated by mochi\n\n" <> types
 }
 
-fn type_def_to_sdl(type_def: sdl_ast.TypeDef) -> String {
-  case type_def {
+fn type_def_to_sdl(td: sdl_ast.TypeDef) -> String {
+  case td {
     sdl_ast.ObjectTypeDefinition(obj) -> object_to_sdl(obj)
     sdl_ast.InterfaceTypeDefinition(iface) -> interface_to_sdl(iface)
-    sdl_ast.EnumTypeDefinition(enum) -> enum_to_sdl(enum)
-    sdl_ast.InputObjectTypeDefinition(input) -> input_to_sdl(input)
-    sdl_ast.UnionTypeDefinition(union) -> union_to_sdl(union)
-    sdl_ast.ScalarTypeDefinition(scalar) -> scalar_to_sdl(scalar)
+    sdl_ast.EnumTypeDefinition(e) -> enum_to_sdl(e)
+    sdl_ast.InputObjectTypeDefinition(i) -> input_to_sdl(i)
+    sdl_ast.UnionTypeDefinition(u) -> union_to_sdl(u)
+    sdl_ast.ScalarTypeDefinition(s) ->
+      opt_desc(s.description) <> "scalar " <> s.name
   }
 }
 
 fn object_to_sdl(obj: sdl_ast.ObjectTypeDef) -> String {
-  let desc = case obj.description {
-    Some(d) -> "\"\"\"" <> d <> "\"\"\"\n"
-    None -> ""
-  }
-
   let implements = case obj.interfaces {
     [] -> ""
     ifaces -> " implements " <> string.join(ifaces, " & ")
   }
-
-  let fields =
-    obj.fields
-    |> list.map(field_to_sdl)
-    |> string.join("\n")
-
-  desc <> "type " <> obj.name <> implements <> " {\n" <> fields <> "\n}"
+  let fields = obj.fields |> list.map(field_to_sdl) |> string.join("\n")
+  opt_desc(obj.description)
+  <> "type "
+  <> obj.name
+  <> implements
+  <> " {\n"
+  <> fields
+  <> "\n}"
 }
 
 fn interface_to_sdl(iface: sdl_ast.InterfaceTypeDef) -> String {
-  let desc = case iface.description {
-    Some(d) -> "\"\"\"" <> d <> "\"\"\"\n"
-    None -> ""
-  }
-
-  let fields =
-    iface.fields
-    |> list.map(field_to_sdl)
-    |> string.join("\n")
-
-  desc <> "interface " <> iface.name <> " {\n" <> fields <> "\n}"
+  let fields = iface.fields |> list.map(field_to_sdl) |> string.join("\n")
+  opt_desc(iface.description) <> "interface " <> iface.name <> " {\n" <> fields <> "\n}"
 }
 
-fn field_to_sdl(field: sdl_ast.FieldDef) -> String {
-  let desc = case field.description {
-    Some(d) -> "  \"" <> d <> "\"\n"
-    None -> ""
-  }
-
-  let args = case field.arguments {
+fn field_to_sdl(f: sdl_ast.FieldDef) -> String {
+  let args = case f.arguments {
     [] -> ""
     args -> "(" <> string.join(list.map(args, arg_to_sdl), ", ") <> ")"
   }
-
-  desc
+  case f.description {
+    Some(d) -> "  \"" <> d <> "\"\n"
+    None -> ""
+  }
   <> "  "
-  <> field.name
+  <> f.name
   <> args
   <> ": "
-  <> sdl_type_to_string(field.field_type)
+  <> sdl_type_to_string(f.field_type)
 }
 
-fn arg_to_sdl(arg: sdl_ast.ArgumentDef) -> String {
-  arg.name <> ": " <> sdl_type_to_string(arg.arg_type)
+fn arg_to_sdl(a: sdl_ast.ArgumentDef) -> String {
+  a.name <> ": " <> sdl_type_to_string(a.arg_type)
 }
 
-fn enum_to_sdl(enum: sdl_ast.EnumTypeDef) -> String {
-  let desc = case enum.description {
-    Some(d) -> "\"\"\"" <> d <> "\"\"\"\n"
-    None -> ""
-  }
-
-  let values =
-    enum.values
-    |> list.map(fn(v) { "  " <> v.name })
-    |> string.join("\n")
-
-  desc <> "enum " <> enum.name <> " {\n" <> values <> "\n}"
+fn enum_to_sdl(e: sdl_ast.EnumTypeDef) -> String {
+  let vals = e.values |> list.map(fn(v) { "  " <> v.name }) |> string.join("\n")
+  opt_desc(e.description) <> "enum " <> e.name <> " {\n" <> vals <> "\n}"
 }
 
-fn input_to_sdl(input: sdl_ast.InputObjectTypeDef) -> String {
-  let desc = case input.description {
-    Some(d) -> "\"\"\"" <> d <> "\"\"\"\n"
-    None -> ""
-  }
-
+fn input_to_sdl(i: sdl_ast.InputObjectTypeDef) -> String {
   let fields =
-    input.fields
-    |> list.map(fn(f) {
-      "  " <> f.name <> ": " <> sdl_type_to_string(f.field_type)
-    })
+    i.fields
+    |> list.map(fn(f) { "  " <> f.name <> ": " <> sdl_type_to_string(f.field_type) })
     |> string.join("\n")
-
-  desc <> "input " <> input.name <> " {\n" <> fields <> "\n}"
+  opt_desc(i.description) <> "input " <> i.name <> " {\n" <> fields <> "\n}"
 }
 
-fn union_to_sdl(union: sdl_ast.UnionTypeDef) -> String {
-  let desc = case union.description {
-    Some(d) -> "\"\"\"" <> d <> "\"\"\"\n"
-    None -> ""
-  }
-
-  desc
+fn union_to_sdl(u: sdl_ast.UnionTypeDef) -> String {
+  opt_desc(u.description)
   <> "union "
-  <> union.name
+  <> u.name
   <> " = "
-  <> string.join(union.member_types, " | ")
+  <> string.join(u.member_types, " | ")
 }
 
-fn scalar_to_sdl(scalar: sdl_ast.ScalarTypeDef) -> String {
-  let desc = case scalar.description {
+fn opt_desc(desc: option.Option(String)) -> String {
+  case desc {
     Some(d) -> "\"\"\"" <> d <> "\"\"\"\n"
     None -> ""
   }
-
-  desc <> "scalar " <> scalar.name
 }
 
-fn sdl_type_to_string(sdl_type: sdl_ast.SDLType) -> String {
-  case sdl_type {
+fn sdl_type_to_string(t: sdl_ast.SDLType) -> String {
+  case t {
     sdl_ast.NamedType(name) -> name
     sdl_ast.NonNullType(inner) -> sdl_type_to_string(inner) <> "!"
     sdl_ast.ListType(inner) -> "[" <> sdl_type_to_string(inner) <> "]"
   }
 }
 
-// Error formatting
+// ── error formatting ──────────────────────────────────────────────────────────
 
 fn format_error(err: CliError) -> String {
   case err {
-    NoSchemaFile -> "Error: No schema file specified"
-    FileReadError(path, reason) ->
-      "Error reading file '" <> path <> "': " <> reason
+    NoSchemaFile -> "Error: No schema file found"
+    FileReadError(path, reason) -> "Error reading '" <> path <> "': " <> reason
     ParseError(msg) -> "Parse error: " <> msg
-    WriteError(path, reason) ->
-      "Error writing file '" <> path <> "': " <> reason
+    WriteError(path, reason) -> "Error writing '" <> path <> "': " <> reason
     InvalidArgs(msg) -> msg
   }
 }
 
 fn format_parse_error(err: sdl_parser.SDLParseError) -> String {
   case err {
-    sdl_parser.SDLLexError(e) -> "Lexer error: " <> format_lex_error(e)
+    sdl_parser.SDLLexError(_) -> "Lexer error"
     sdl_parser.UnexpectedToken(expected, _, pos) ->
-      "Unexpected token at line "
-      <> int_to_string(pos.line)
-      <> ", expected "
-      <> expected
+      "Unexpected token at line " <> int.to_string(pos.line) <> ", expected " <> expected
     sdl_parser.UnexpectedEOF(expected) ->
       "Unexpected end of file, expected " <> expected
     sdl_parser.InvalidTypeDefinition(msg, pos) ->
-      "Invalid type at line " <> int_to_string(pos.line) <> ": " <> msg
+      "Invalid type at line " <> int.to_string(pos.line) <> ": " <> msg
   }
-}
-
-fn format_lex_error(_err) -> String {
-  "Lexer error"
 }
 
 fn simplifile_error_to_string(_err) -> String {
   "File system error"
 }
 
-fn int_to_string(n: Int) -> String {
-  case n {
-    0 -> "0"
-    1 -> "1"
-    2 -> "2"
-    3 -> "3"
-    4 -> "4"
-    5 -> "5"
-    6 -> "6"
-    7 -> "7"
-    8 -> "8"
-    9 -> "9"
-    _ -> "?"
-  }
-}
+// ── help text ─────────────────────────────────────────────────────────────────
 
 fn help_text() -> String {
   "mochi - GraphQL Code Generator for Gleam
@@ -650,24 +749,22 @@ Usage:
   gleam run -m mochi_codegen/cli -- <command>
 
 Commands:
-  init                       Create mochi.config.json
-  generate                   Generate code from config
-  <schema.graphql> [opts]    Direct mode (no config file)
+  init                               Create mochi.config.json
+  generate                           Generate code from config
+  <schema(s)> [opts]                 Direct mode (glob or file list)
 
 Direct Mode Options:
-  --typescript, -t <file>   Generate TypeScript types
-  --gleam, -g <file>        Generate Gleam types
-  --resolvers, -r <file>    Generate resolver stubs
-  --sdl, -s <file>          Generate normalized SDL
+  --typescript, -t <path>   TypeScript output (file or dir/)
+  --gleam, -g <path>        Gleam types output (file or dir/)
+  --resolvers, -r <path>    Gleam resolver stubs (file or dir/)
+  --sdl, -s <file>          Normalised SDL output
   --all, -a <prefix>        Generate all files with prefix
   --help, -h                Show this help
 
 Examples:
-  gleam run -m mochi_codegen/cli -- init
-  gleam run -m mochi_codegen/cli -- init schema.graphql
   gleam run -m mochi_codegen/cli -- generate
-  gleam run -m mochi_codegen/cli -- schema.graphql -t types.ts
-  gleam run -m mochi_codegen/cli -- schema.graphql --all generated/schema
+  gleam run -m mochi_codegen/cli -- 'graphql/*.graphql' -g src/api/domain/ -t src/generated/types.ts
+  gleam run -m mochi_codegen/cli -- user.graphql store.graphql -g src/domain/
 "
 }
 
@@ -675,60 +772,53 @@ fn init_help_text() -> String {
   "mochi init - Initialize a mochi project
 
 Usage:
-  gleam run -m mochi_codegen/cli -- init [schema_path]
+  gleam run -m mochi_codegen/cli -- init [schema_glob]
 
-Creates a mochi.config.json in the current directory with default settings.
-Optionally specify the schema file path (default: schema.graphql).
+Creates mochi.config.json. Optionally specify a schema glob (default: schema.graphql).
 
 Examples:
   gleam run -m mochi_codegen/cli -- init
-  gleam run -m mochi_codegen/cli -- init src/schema.graphql
+  gleam run -m mochi_codegen/cli -- init 'graphql/*.graphql'
 "
 }
 
 fn generate_help_text() -> String {
-  "mochi generate - Generate code from config
+  "mochi generate - Generate code from mochi.config.json
 
 Usage:
   gleam run -m mochi_codegen/cli -- generate [options]
 
-Reads mochi.config.json and generates all configured outputs.
+The \"schema\" field accepts a glob string or an array of globs/paths.
+Output paths ending in \"/\" produce one file per source schema file.
 
 Options:
   --config, -c <file>   Use a custom config file path
   --help, -h            Show this help
-
-Examples:
-  gleam run -m mochi_codegen/cli -- generate
-  gleam run -m mochi_codegen/cli -- generate --config custom.config.json
 "
 }
 
-// FFI for Erlang VM
+// ── FFI ───────────────────────────────────────────────────────────────────────
+
 @external(erlang, "erlang", "halt")
 fn halt(code: Int) -> Nil
 
 @external(erlang, "mochi_ffi", "get_args")
 fn get_args() -> List(String)
 
-// For use from code (not CLI)
+// For programmatic use
 
-/// Generate TypeScript types from a schema
 pub fn typescript(schema: Schema) -> String {
   typescript.generate(schema)
 }
 
-/// Generate GraphQL SDL from a schema
 pub fn sdl(schema: Schema) -> String {
   sdl.generate(schema)
 }
 
-/// Print TypeScript types to stdout
 pub fn print_typescript(schema: Schema) -> Nil {
   io.println(typescript.generate(schema))
 }
 
-/// Print SDL to stdout
 pub fn print_sdl(schema: Schema) -> Nil {
   io.println(sdl.generate(schema))
 }

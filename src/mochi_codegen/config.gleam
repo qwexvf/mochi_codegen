@@ -1,38 +1,62 @@
 // mochi_codegen/config.gleam
 // Project configuration for mochi code generation
 //
-// Config file: mochi.config.json
+// Config file: mochi.config.yaml
+//
+// Example:
+//
+//   schema: "graphql/*.graphql"
+//
+//   output:
+//     gleam_types: "src/api/domain/"
+//     resolvers: "src/api/schema/"
+//     typescript: "apps/web/src/generated/types.ts"
+//
+//   gleam:
+//     types_module_prefix: "api/domain"
+//     resolvers_module_prefix: "api/schema"
+//     type_suffix: "_types"
+//     resolver_suffix: "_resolvers"
+//     generate_docs: true
+//
+// Output paths:
+//   - Ending in "/" → directory mode: one file generated per source schema file.
+//   - Otherwise     → single file: all schema files merged into one output.
+//
+// Schema:
+//   Accepts a glob string ("graphql/*.graphql"), a single path, or a YAML list
+//   of globs/paths. Globs are expanded at generation time.
 
-import gleam/dynamic/decode
-import gleam/json
 import gleam/option.{type Option, None, Some}
+import gleam/string
 import simplifile
+import taffy
 
 /// Default config file name
-pub const config_file = "mochi.config.json"
+pub const config_file = "mochi.config.yaml"
 
 /// Project configuration
 pub type Config {
   Config(
-    /// Path to the GraphQL schema file(s)
-    schema: String,
-    /// Output file paths
+    /// Glob pattern(s) or explicit path(s) to GraphQL schema files.
+    schema: List(String),
+    /// Output configuration
     output: OutputConfig,
-    /// Gleam codegen options
+    /// Gleam-specific codegen options
     gleam: GleamConfig,
   )
 }
 
-/// Output file path configuration
+/// Output paths. A path ending in "/" generates one file per schema file.
 pub type OutputConfig {
   OutputConfig(
-    /// TypeScript type definitions output path
+    /// TypeScript type definitions (file or directory)
     typescript: Option(String),
-    /// Gleam types output path
+    /// Gleam domain types (file or directory)
     gleam_types: Option(String),
-    /// Gleam resolver stubs output path
+    /// Gleam resolver stubs (file or directory)
     resolvers: Option(String),
-    /// Normalized SDL output path
+    /// Normalised SDL output (file only)
     sdl: Option(String),
   )
 }
@@ -40,120 +64,226 @@ pub type OutputConfig {
 /// Gleam code generation options
 pub type GleamConfig {
   GleamConfig(
-    /// Module name for generated types
-    types_module: String,
-    /// Module name for generated resolvers
-    resolvers_module: String,
-    /// Whether to generate doc comments
+    /// Module prefix for generated type files (e.g. "api/domain")
+    types_module_prefix: String,
+    /// Module prefix for generated resolver files (e.g. "api/schema")
+    resolvers_module_prefix: String,
+    /// Suffix for type filenames, without extension (default: "_types")
+    /// e.g. "user.graphql" + "_types" → "user_types.gleam"
+    type_suffix: String,
+    /// Suffix for resolver filenames, without extension (default: "_resolvers")
+    resolver_suffix: String,
+    /// Extra import lines added to every generated resolver file.
+    /// The types module import is always added automatically.
+    /// Example: ["gleam/dynamic.{type Dynamic}", "mochi/schema.{type ExecutionContext}"]
+    resolver_imports: List(String),
+    /// Whether to add doc comments to generated code
     generate_docs: Bool,
   )
+}
+
+/// Whether an output path is a directory (ends with "/")
+pub fn is_dir_output(path: String) -> Bool {
+  string.ends_with(path, "/")
 }
 
 /// Create a default config
 pub fn default() -> Config {
   Config(
-    schema: "schema.graphql",
+    schema: ["schema.graphql"],
     output: OutputConfig(
       typescript: Some("src/generated/types.ts"),
-      gleam_types: Some("src/generated/schema_types.gleam"),
-      resolvers: Some("src/generated/resolvers.gleam"),
+      gleam_types: Some("src/generated/"),
+      resolvers: Some("src/generated/"),
       sdl: None,
     ),
     gleam: GleamConfig(
-      types_module: "schema_types",
-      resolvers_module: "resolvers",
+      types_module_prefix: "generated",
+      resolvers_module_prefix: "generated",
+      type_suffix: "_types",
+      resolver_suffix: "_resolvers",
+      resolver_imports: [],
       generate_docs: True,
     ),
   )
 }
 
-/// Encode config to JSON string
-pub fn to_json(config: Config) -> String {
-  json.object([
-    #("schema", json.string(config.schema)),
-    #("output", encode_output(config.output)),
-    #("gleam", encode_gleam(config.gleam)),
-  ])
-  |> json.to_string
+/// Serialise config to a YAML string
+pub fn to_yaml(config: Config) -> String {
+  let schema_yaml = case config.schema {
+    [single] -> "schema: \"" <> single <> "\"\n"
+    many ->
+      "schema:\n"
+      <> string.join(list.map(many, fn(p) { "  - \"" <> p <> "\"" }), "\n")
+      <> "\n"
+  }
+
+  let output_yaml =
+    "output:\n"
+    <> opt_yaml_field("  typescript", config.output.typescript)
+    <> opt_yaml_field("  gleam_types", config.output.gleam_types)
+    <> opt_yaml_field("  resolvers", config.output.resolvers)
+    <> opt_yaml_field("  sdl", config.output.sdl)
+
+  let resolver_imports_yaml = case config.gleam.resolver_imports {
+    [] -> ""
+    imports ->
+      "  resolver_imports:\n"
+      <> string.join(list.map(imports, fn(i) { "    - \"" <> i <> "\"" }), "\n")
+      <> "\n"
+  }
+
+  let gleam_yaml =
+    "gleam:\n"
+    <> "  types_module_prefix: \""
+    <> config.gleam.types_module_prefix
+    <> "\"\n"
+    <> "  resolvers_module_prefix: \""
+    <> config.gleam.resolvers_module_prefix
+    <> "\"\n"
+    <> "  type_suffix: \""
+    <> config.gleam.type_suffix
+    <> "\"\n"
+    <> "  resolver_suffix: \""
+    <> config.gleam.resolver_suffix
+    <> "\"\n"
+    <> resolver_imports_yaml
+    <> "  generate_docs: "
+    <> bool_to_yaml(config.gleam.generate_docs)
+    <> "\n"
+
+  schema_yaml <> "\n" <> output_yaml <> "\n" <> gleam_yaml
 }
 
-fn encode_output(output: OutputConfig) -> json.Json {
-  json.object(
-    []
-    |> prepend_optional("sdl", output.sdl)
-    |> prepend_optional("resolvers", output.resolvers)
-    |> prepend_optional("gleam_types", output.gleam_types)
-    |> prepend_optional("typescript", output.typescript),
-  )
-}
-
-fn prepend_optional(
-  entries: List(#(String, json.Json)),
-  key: String,
-  value: Option(String),
-) -> List(#(String, json.Json)) {
+fn opt_yaml_field(key: String, value: Option(String)) -> String {
   case value {
-    Some(v) -> [#(key, json.string(v)), ..entries]
-    None -> entries
+    Some(v) -> key <> ": \"" <> v <> "\"\n"
+    None -> ""
   }
 }
 
-fn encode_gleam(gleam: GleamConfig) -> json.Json {
-  json.object([
-    #("types_module", json.string(gleam.types_module)),
-    #("resolvers_module", json.string(gleam.resolvers_module)),
-    #("generate_docs", json.bool(gleam.generate_docs)),
-  ])
-}
-
-/// Decode config from JSON string
-pub fn from_json(input: String) -> Result(Config, String) {
-  case json.parse(input, config_decoder()) {
-    Ok(config) -> Ok(config)
-    Error(_) -> Error("Failed to parse mochi.config.json")
+fn bool_to_yaml(b: Bool) -> String {
+  case b {
+    True -> "true"
+    False -> "false"
   }
 }
 
-fn config_decoder() -> decode.Decoder(Config) {
-  use schema <- decode.field("schema", decode.string)
-  use output <- decode.field("output", output_decoder())
-  use gleam <- decode.field("gleam", gleam_decoder())
-  decode.success(Config(schema:, output:, gleam:))
+import gleam/list
+import gleam/result
+
+/// Parse config from a YAML string
+pub fn from_yaml(input: String) -> Result(Config, String) {
+  case taffy.parse(input) {
+    Error(e) -> Error("Failed to parse YAML: " <> taffy.error_message(e))
+    Ok(doc) -> decode_config(doc)
+  }
 }
 
-fn output_decoder() -> decode.Decoder(OutputConfig) {
-  use typescript <- decode.optional_field(
-    "typescript",
-    None,
-    decode.optional(decode.string),
-  )
-  use gleam_types <- decode.optional_field(
-    "gleam_types",
-    None,
-    decode.optional(decode.string),
-  )
-  use resolvers <- decode.optional_field(
-    "resolvers",
-    None,
-    decode.optional(decode.string),
-  )
-  use sdl <- decode.optional_field("sdl", None, decode.optional(decode.string))
-  decode.success(OutputConfig(typescript:, gleam_types:, resolvers:, sdl:))
+fn decode_config(doc: taffy.Value) -> Result(Config, String) {
+  use schema <- result.try(decode_schema(doc))
+  use output <- result.try(decode_output(doc))
+  use gleam <- result.try(decode_gleam(doc))
+  Ok(Config(schema:, output:, gleam:))
 }
 
-fn gleam_decoder() -> decode.Decoder(GleamConfig) {
-  use types_module <- decode.optional_field(
-    "types_module",
-    "schema_types",
-    decode.string,
-  )
-  use resolvers_module <- decode.optional_field(
-    "resolvers_module",
-    "resolvers",
-    decode.string,
-  )
-  use generate_docs <- decode.optional_field("generate_docs", True, decode.bool)
-  decode.success(GleamConfig(types_module:, resolvers_module:, generate_docs:))
+fn decode_schema(doc: taffy.Value) -> Result(List(String), String) {
+  case taffy.get(doc, "schema") {
+    Error(_) -> Error("missing required field \"schema\"")
+    Ok(val) ->
+      case taffy.as_list(val) {
+        Some(items) -> {
+          let strs =
+            list.filter_map(items, fn(v) {
+              case taffy.as_string(v) {
+                Some(s) -> Ok(s)
+                None -> Error(Nil)
+              }
+            })
+          Ok(strs)
+        }
+        None ->
+          case taffy.as_string(val) {
+            Some(s) -> Ok([s])
+            None -> Error("\"schema\" must be a string or list of strings")
+          }
+      }
+  }
+}
+
+fn decode_output(doc: taffy.Value) -> Result(OutputConfig, String) {
+  let output = case taffy.get(doc, "output") {
+    Ok(v) -> v
+    Error(_) -> taffy.mapping([])
+  }
+  Ok(OutputConfig(
+    typescript: opt_string(output, "typescript"),
+    gleam_types: opt_string(output, "gleam_types"),
+    resolvers: opt_string(output, "resolvers"),
+    sdl: opt_string(output, "sdl"),
+  ))
+}
+
+fn decode_gleam(doc: taffy.Value) -> Result(GleamConfig, String) {
+  let g = case taffy.get(doc, "gleam") {
+    Ok(v) -> v
+    Error(_) -> taffy.mapping([])
+  }
+  Ok(GleamConfig(
+    types_module_prefix: req_string(g, "types_module_prefix", "generated"),
+    resolvers_module_prefix: req_string(
+      g,
+      "resolvers_module_prefix",
+      "generated",
+    ),
+    type_suffix: req_string(g, "type_suffix", "_types"),
+    resolver_suffix: req_string(g, "resolver_suffix", "_resolvers"),
+    resolver_imports: opt_string_list(g, "resolver_imports"),
+    generate_docs: req_bool(g, "generate_docs", True),
+  ))
+}
+
+fn opt_string(val: taffy.Value, key: String) -> Option(String) {
+  case taffy.get(val, key) {
+    Ok(v) -> taffy.as_string(v)
+    Error(_) -> None
+  }
+}
+
+fn req_string(val: taffy.Value, key: String, default: String) -> String {
+  case taffy.get(val, key) {
+    Ok(v) ->
+      case taffy.as_string(v) {
+        Some(s) -> s
+        None -> default
+      }
+    Error(_) -> default
+  }
+}
+
+fn opt_string_list(val: taffy.Value, key: String) -> List(String) {
+  case taffy.get(val, key) {
+    Ok(v) ->
+      case taffy.as_list(v) {
+        Some(items) ->
+          list.filter_map(items, fn(item) {
+            option.to_result(taffy.as_string(item), Nil)
+          })
+        None -> []
+      }
+    Error(_) -> []
+  }
+}
+
+fn req_bool(val: taffy.Value, key: String, default: Bool) -> Bool {
+  case taffy.get(val, key) {
+    Ok(v) ->
+      case taffy.as_bool(v) {
+        Some(b) -> b
+        None -> default
+      }
+    Error(_) -> default
+  }
 }
 
 /// Read config from the default config file
@@ -164,7 +294,7 @@ pub fn read() -> Result(Config, String) {
 /// Read config from a specific path
 pub fn read_from(path: String) -> Result(Config, String) {
   case simplifile.read(path) {
-    Ok(content) -> from_json(content)
+    Ok(content) -> from_yaml(content)
     Error(_) ->
       Error(
         "Could not read "
@@ -181,7 +311,7 @@ pub fn write(config: Config) -> Result(Nil, String) {
 
 /// Write config to a specific path
 pub fn write_to(config: Config, path: String) -> Result(Nil, String) {
-  case simplifile.write(path, to_json(config) <> "\n") {
+  case simplifile.write(path, to_yaml(config)) {
     Ok(_) -> Ok(Nil)
     Error(_) -> Error("Could not write " <> path)
   }
