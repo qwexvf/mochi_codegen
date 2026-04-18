@@ -5,7 +5,7 @@ licences = ["Apache-2.0"]
 repository = { type = "github", user = "qwexvf", repo = "mochi" }
 
 [dependencies]
-gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"
 gleam_json = ">= 3.0.0 and < 4.0.0"
 simplifile = ">= 2.0.0 and < 3.0.0"
 mochi = { git = "https://github.com/qwexvf/mochi", ref = "main" }
