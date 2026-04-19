@@ -40,6 +40,8 @@ pub type Config {
   Config(
     /// Glob pattern(s) or explicit path(s) to GraphQL schema files.
     schema: List(String),
+    /// Glob pattern(s) for GraphQL operation files (.gql) to generate resolvers from.
+    operations_input: Option(String),
     /// Output configuration
     output: OutputConfig,
     /// Gleam-specific codegen options
@@ -56,6 +58,8 @@ pub type OutputConfig {
     gleam_types: Option(String),
     /// Gleam resolver stubs (file or directory)
     resolvers: Option(String),
+    /// Gleam operation-based resolver boilerplate (directory only)
+    operations: Option(String),
     /// Normalised SDL output (file only)
     sdl: Option(String),
   )
@@ -91,10 +95,12 @@ pub fn is_dir_output(path: String) -> Bool {
 pub fn default() -> Config {
   Config(
     schema: ["schema.graphql"],
+    operations_input: None,
     output: OutputConfig(
       typescript: Some("src/generated/types.ts"),
       gleam_types: Some("src/generated/"),
       resolvers: Some("src/generated/"),
+      operations: None,
       sdl: None,
     ),
     gleam: GleamConfig(
@@ -118,11 +124,15 @@ pub fn to_yaml(config: Config) -> String {
       <> "\n"
   }
 
+  let operations_input_yaml =
+    opt_yaml_field("operations_input", config.operations_input)
+
   let output_yaml =
     "output:\n"
     <> opt_yaml_field("  typescript", config.output.typescript)
     <> opt_yaml_field("  gleam_types", config.output.gleam_types)
     <> opt_yaml_field("  resolvers", config.output.resolvers)
+    <> opt_yaml_field("  operations", config.output.operations)
     <> opt_yaml_field("  sdl", config.output.sdl)
 
   let resolver_imports_yaml = case config.gleam.resolver_imports {
@@ -152,7 +162,7 @@ pub fn to_yaml(config: Config) -> String {
     <> bool_to_yaml(config.gleam.generate_docs)
     <> "\n"
 
-  schema_yaml <> "\n" <> output_yaml <> "\n" <> gleam_yaml
+  schema_yaml <> "\n" <> operations_input_yaml <> "\n" <> output_yaml <> "\n" <> gleam_yaml
 }
 
 fn opt_yaml_field(key: String, value: Option(String)) -> String {
@@ -184,7 +194,12 @@ fn decode_config(doc: taffy.Value) -> Result(Config, String) {
   use schema <- result.try(decode_schema(doc))
   use output <- result.try(decode_output(doc))
   use gleam <- result.try(decode_gleam(doc))
-  Ok(Config(schema:, output:, gleam:))
+  Ok(Config(
+    schema:,
+    operations_input: opt_string(doc, "operations_input"),
+    output:,
+    gleam:,
+  ))
 }
 
 fn decode_schema(doc: taffy.Value) -> Result(List(String), String) {
@@ -220,6 +235,7 @@ fn decode_output(doc: taffy.Value) -> Result(OutputConfig, String) {
     typescript: opt_string(output, "typescript"),
     gleam_types: opt_string(output, "gleam_types"),
     resolvers: opt_string(output, "resolvers"),
+    operations: opt_string(output, "operations"),
     sdl: opt_string(output, "sdl"),
   ))
 }

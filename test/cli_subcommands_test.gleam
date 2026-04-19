@@ -92,10 +92,12 @@ pub fn generate_with_valid_schema_succeeds_test() {
   let conf =
     config.Config(
       schema: [schema_path],
+      operations_input: option.None,
       output: config.OutputConfig(
         typescript: option.Some(ts_path),
         gleam_types: option.None,
         resolvers: option.None,
+        operations: option.None,
         sdl: option.None,
       ),
       gleam: config.GleamConfig(
