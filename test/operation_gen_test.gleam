@@ -30,7 +30,10 @@ pub fn single_scalar_query_generates_query_with_args_test() {
 }
 
 pub fn single_input_type_mutation_generates_input_decode_test() {
-  let ops = parse_ops("mutation CreatePost($input: PostInput!) { createPost(input: $input) { id } }")
+  let ops =
+    parse_ops(
+      "mutation CreatePost($input: PostInput!) { createPost(input: $input) { id } }",
+    )
   let schema =
     parse_schema(
       "type Mutation { createPost(input: PostInput!): Post }
@@ -55,8 +58,12 @@ type User { id: ID! }",
     )
   let out = operation_gen.generate(ops, schema)
   out |> contains("import gleam/result") |> should.be_true
-  out |> contains("result.try(query.get_id(args, \"userId\"))") |> should.be_true
-  out |> contains("result.try(query.get_id(args, \"targetId\"))") |> should.be_true
+  out
+  |> contains("result.try(query.get_id(args, \"userId\"))")
+  |> should.be_true
+  out
+  |> contains("result.try(query.get_id(args, \"targetId\"))")
+  |> should.be_true
   out |> contains("Ok(#(user_id, target_id))") |> should.be_true
 }
 
@@ -73,7 +80,9 @@ input PostInput { title: String! body: String! }",
     )
   let out = operation_gen.generate(ops, schema)
   out |> contains("import gleam/result") |> should.be_true
-  out |> contains("result.try(query.get_id(args, \"userId\"))") |> should.be_true
+  out
+  |> contains("result.try(query.get_id(args, \"userId\"))")
+  |> should.be_true
   out |> contains("dict.get(args, \"input\")") |> should.be_true
   out |> contains("decode.run") |> should.be_true
   out |> contains("get_string(args, \"input\")") |> should.be_false

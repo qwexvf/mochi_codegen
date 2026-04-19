@@ -305,15 +305,17 @@ fn generate_from_paths(
         )
         use ops_doc <- result.try(
           mochi_parser.parse(content)
-          |> result.map_error(fn(e) {
-            ParseError(format_op_parse_error(e))
-          }),
+          |> result.map_error(fn(e) { ParseError(format_op_parse_error(e)) }),
         )
         let generated = operation_gen.generate(ops_doc, merged)
         let filename = schema_stem(op_path) <> resolver_suffix <> ".gleam"
         let dest = out_path <> filename
         use _ <- result.try(ensure_dir(out_path))
-        use written <- result.try(write_with_policy(dest, generated, MergeNewFunctions))
+        use written <- result.try(write_with_policy(
+          dest,
+          generated,
+          MergeNewFunctions,
+        ))
         let msg = case written {
           True -> "Generated operations: " <> dest
           False -> "Generated operations (up to date): " <> dest

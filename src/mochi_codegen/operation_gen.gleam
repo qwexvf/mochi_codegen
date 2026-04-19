@@ -122,8 +122,12 @@ pub fn generate(ops_doc: ast.Document, schema_doc: SDLDocument) -> String {
 
 fn generate_op(op: ast.Operation, schema_doc: SDLDocument) -> String {
   let #(op_type, vars, sel) = case op {
-    ast.Operation(operation_type: t, variable_definitions: v, selection_set: s, ..) ->
-      #(t, v, s)
+    ast.Operation(
+      operation_type: t,
+      variable_definitions: v,
+      selection_set: s,
+      ..,
+    ) -> #(t, v, s)
     ast.ShorthandQuery(selection_set: s) -> #(ast.Query, [], s)
   }
 
@@ -253,11 +257,7 @@ fn generate_decode(
         True -> generate_input_decode_block(v.variable, type_name, schema_doc)
         False -> {
           let helper = scalar_to_helper(type_name)
-          "fn(args) { query."
-          <> helper
-          <> "(args, \""
-          <> v.variable
-          <> "\") }"
+          "fn(args) { query." <> helper <> "(args, \"" <> v.variable <> "\") }"
         }
       }
     }
@@ -439,10 +439,7 @@ fn generate_resolve(
     <> "\")"
 
   case vars {
-    [] ->
-      "fn(_args, _ctx) {\n"
-      <> todo_body
-      <> "\n    }"
+    [] -> "fn(_args, _ctx) {\n" <> todo_body <> "\n    }"
     [v] -> {
       let type_name = ast_inner_type_name(v.type_)
       case is_input_type(type_name, schema_doc) {

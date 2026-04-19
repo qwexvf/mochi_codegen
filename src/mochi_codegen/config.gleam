@@ -162,7 +162,13 @@ pub fn to_yaml(config: Config) -> String {
     <> bool_to_yaml(config.gleam.generate_docs)
     <> "\n"
 
-  schema_yaml <> "\n" <> operations_input_yaml <> "\n" <> output_yaml <> "\n" <> gleam_yaml
+  schema_yaml
+  <> "\n"
+  <> operations_input_yaml
+  <> "\n"
+  <> output_yaml
+  <> "\n"
+  <> gleam_yaml
 }
 
 fn opt_yaml_field(key: String, value: Option(String)) -> String {
