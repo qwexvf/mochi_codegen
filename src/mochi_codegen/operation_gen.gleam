@@ -22,10 +22,7 @@ pub fn generate(ops_doc: ast.Document, schema_doc: SDLDocument) -> String {
           has_input_arg(op, schema_doc) || count_vars(op) >= 2
         })
       let needs_list = list.any(ops, has_list_return(_, schema_doc))
-      let needs_result =
-        list.any(ops, fn(op) {
-          count_vars(op) >= 2 && !has_input_arg(op, schema_doc)
-        })
+      let needs_result = list.any(ops, fn(op) { count_vars(op) >= 2 })
       let encoder_types = collect_encoder_types(ops, schema_doc)
       let needs_dynamic = needs_dict || encoder_types != []
       let needs_none = list.any(ops, has_nullable_input_field(_, schema_doc))
@@ -59,7 +56,6 @@ pub fn generate(ops_doc: ast.Document, schema_doc: SDLDocument) -> String {
           Some("import mochi/query"),
           Some("import mochi/schema"),
           Some("import mochi/types"),
-          Some("import pog"),
         ]
         |> list.filter_map(fn(x) { option.to_result(x, Nil) })
         |> string.join("\n")
@@ -172,7 +168,7 @@ fn generate_op(op: ast.Operation, schema_doc: SDLDocument) -> String {
     ast.Subscription ->
       "fn "
       <> fn_nm
-      <> "(_db: pog.Connection) {\n"
+      <> "(_db: a) {\n"
       <> "  "
       <> add_fn
       <> "(\n"
@@ -202,7 +198,7 @@ fn generate_op(op: ast.Operation, schema_doc: SDLDocument) -> String {
     _ ->
       "fn "
       <> fn_nm
-      <> "(_db: pog.Connection) {\n"
+      <> "(_db: a) {\n"
       <> "  "
       <> add_fn
       <> "(\n"
@@ -269,14 +265,24 @@ fn generate_decode(
       let lines =
         list.map(vs, fn(v) {
           let type_name = ast_inner_type_name(v.type_)
-          let helper = scalar_to_helper(type_name)
-          "      use "
-          <> to_snake_case(v.variable)
-          <> " <- result.try(query."
-          <> helper
-          <> "(args, \""
-          <> v.variable
-          <> "\"))"
+          case is_input_type(type_name, schema_doc) {
+            True ->
+              generate_multi_input_decode_line(
+                v.variable,
+                type_name,
+                schema_doc,
+              )
+            False -> {
+              let helper = scalar_to_helper(type_name)
+              "      use "
+              <> to_snake_case(v.variable)
+              <> " <- result.try(query."
+              <> helper
+              <> "(args, \""
+              <> v.variable
+              <> "\"))"
+            }
+          }
         })
       let names =
         list.map(vs, fn(v) { to_snake_case(v.variable) }) |> string.join(", ")
@@ -314,22 +320,13 @@ fn generate_input_decode_block(
           <> dec
           <> ")"
         False ->
-          case inner {
-            "String" ->
-              "            use "
-              <> to_snake_case(f.name)
-              <> " <- decode.optional_field(\""
-              <> f.name
-              <> "\", \"\", decode.string)"
-            _ ->
-              "            use "
-              <> to_snake_case(f.name)
-              <> " <- decode.optional_field(\""
-              <> f.name
-              <> "\", None, types.nullable("
-              <> dec
-              <> "))"
-          }
+          "            use "
+          <> to_snake_case(f.name)
+          <> " <- decode.optional_field(\""
+          <> f.name
+          <> "\", None, types.nullable("
+          <> dec
+          <> "))"
       }
     })
     |> string.join("\n")
@@ -363,6 +360,67 @@ fn generate_input_decode_block(
   <> "        Error(_) -> Error(\"Missing input argument\")\n"
   <> "      }\n"
   <> "    }"
+}
+
+fn generate_multi_input_decode_line(
+  arg_name: String,
+  type_name: String,
+  schema_doc: SDLDocument,
+) -> String {
+  let fields = find_input_fields(type_name, schema_doc)
+  let field_lines =
+    list.map(fields, fn(f) {
+      let is_nonnull = sdl_is_nonnull(f.field_type)
+      let inner = sdl_inner_type_name(f.field_type)
+      let dec = scalar_to_decode_fn(inner)
+      case is_nonnull {
+        True ->
+          "              use "
+          <> to_snake_case(f.name)
+          <> " <- decode.field(\""
+          <> f.name
+          <> "\", "
+          <> dec
+          <> ")"
+        False ->
+          "              use "
+          <> to_snake_case(f.name)
+          <> " <- decode.optional_field(\""
+          <> f.name
+          <> "\", None, types.nullable("
+          <> dec
+          <> "))"
+      }
+    })
+    |> string.join("\n")
+  let names =
+    list.map(fields, fn(f) { to_snake_case(f.name) }) |> string.join(", ")
+  let tuple = case fields {
+    [_] -> names
+    _ -> "#(" <> names <> ")"
+  }
+  "      use "
+  <> to_snake_case(arg_name)
+  <> " <- result.try(case dict.get(args, \""
+  <> arg_name
+  <> "\") {\n"
+  <> "        Ok(dyn_) -> {\n"
+  <> "          let decoder = {\n"
+  <> field_lines
+  <> "\n"
+  <> "            decode.success("
+  <> tuple
+  <> ")\n"
+  <> "          }\n"
+  <> "          case decode.run(dyn_, decoder) {\n"
+  <> "            Ok(val) -> Ok(val)\n"
+  <> "            Error(_) -> Error(\"Invalid "
+  <> type_name
+  <> "\")\n"
+  <> "          }\n"
+  <> "        }\n"
+  <> "        Error(_) -> Error(\"Missing input argument\")\n"
+  <> "      })"
 }
 
 // ── Resolve lambda ────────────────────────────────────────────────────────────
@@ -497,7 +555,7 @@ fn generate_register(ops: List(ast.Operation)) -> String {
 
   "pub fn register(\n"
   <> "  builder: query.SchemaBuilder,\n"
-  <> "  db: pog.Connection,\n"
+  <> "  db: a,\n"
   <> ") -> query.SchemaBuilder {\n"
   <> "  builder\n"
   <> adds
@@ -728,8 +786,7 @@ fn has_nullable_input_field(op: ast.Operation, schema_doc: SDLDocument) -> Bool 
       False -> False
       True ->
         list.any(find_input_fields(type_name, schema_doc), fn(f) {
-          let inner = sdl_inner_type_name(f.field_type)
-          !sdl_is_nonnull(f.field_type) && inner != "String"
+          !sdl_is_nonnull(f.field_type)
         })
     }
   })

@@ -2,10 +2,10 @@ import gleam/list
 import gleam/option.{Some}
 import gleam/string
 import mochi/sdl_ast.{
-  type ArgumentDef, type EnumTypeDef, type EnumValueDef, type FieldDef,
-  type InputFieldDef, type InputObjectTypeDef, type InterfaceTypeDef,
-  type ObjectTypeDef, type SDLDocument, type SDLType, type ScalarTypeDef,
-  type TypeDef, type UnionTypeDef,
+  type EnumTypeDef, type EnumValueDef, type FieldDef, type InputFieldDef,
+  type InputObjectTypeDef, type InterfaceTypeDef, type ObjectTypeDef,
+  type SDLDocument, type SDLType, type ScalarTypeDef, type TypeDef,
+  type UnionTypeDef,
 }
 
 pub type GleamGenConfig {
