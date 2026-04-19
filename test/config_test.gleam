@@ -90,10 +90,12 @@ pub fn roundtrip_custom_config_test() {
   let conf =
     config.Config(
       schema: ["src/api.graphql"],
+      operations_input: None,
       output: config.OutputConfig(
         typescript: Some("out/types.ts"),
         gleam_types: None,
         resolvers: Some("out/resolvers.gleam"),
+        operations: None,
         sdl: Some("out/schema.graphql"),
       ),
       gleam: config.GleamConfig(
@@ -182,6 +184,7 @@ pub fn to_yaml_omits_null_outputs_test() {
         typescript: None,
         gleam_types: None,
         resolvers: None,
+        operations: None,
         sdl: None,
       ),
     )

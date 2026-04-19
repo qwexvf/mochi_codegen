@@ -4,11 +4,13 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
+import mochi/parser as mochi_parser
 import mochi/schema.{type Schema}
 import mochi/sdl_ast.{type SDLDocument, SDLDocument}
 import mochi/sdl_parser
 import mochi_codegen/config
 import mochi_codegen/gleam as gleam_gen
+import mochi_codegen/operation_gen
 import mochi_codegen/sdl
 import mochi_codegen/typescript
 import simplifile
@@ -140,6 +142,7 @@ fn run_generate(args: List(String)) -> Result(String, CliError) {
         gleam_config,
         conf.gleam.type_suffix,
         conf.gleam.resolver_suffix,
+        conf.operations_input,
       ))
 
       case messages {
@@ -163,6 +166,7 @@ fn run_direct(args: List(String)) -> Result(String, CliError) {
       typescript: option.from_result(cli_config.typescript_output),
       gleam_types: option.from_result(cli_config.gleam_output),
       resolvers: option.from_result(cli_config.resolvers_output),
+      operations: None,
       sdl: option.from_result(cli_config.sdl_output),
     )
 
@@ -172,6 +176,7 @@ fn run_direct(args: List(String)) -> Result(String, CliError) {
     gleam_config,
     "_types",
     "_resolvers",
+    None,
   ))
 
   case messages {
@@ -192,6 +197,7 @@ fn generate_from_paths(
   gleam_config: gleam_gen.GleamGenConfig,
   type_suffix: String,
   resolver_suffix: String,
+  operations_input: option.Option(String),
 ) -> Result(List(String), CliError) {
   use merged <- result.try(read_and_merge_schemas(paths))
 
@@ -284,6 +290,40 @@ fn generate_from_paths(
         MergeNewFunctions,
       )
     }
+  })
+
+  // Operations — read .gql operation files, generate resolver boilerplate
+  use messages <- result.try(case operations_input, output.operations {
+    Some(input_glob), Some(out_path) -> {
+      use op_paths <- result.try(expand_globs([input_glob]))
+      list.try_fold(op_paths, messages, fn(msgs, op_path) {
+        use content <- result.try(
+          simplifile.read(op_path)
+          |> result.map_error(fn(_) {
+            FileReadError(op_path, "File system error")
+          }),
+        )
+        use ops_doc <- result.try(
+          mochi_parser.parse(content)
+          |> result.map_error(fn(e) { ParseError(format_op_parse_error(e)) }),
+        )
+        let generated = operation_gen.generate(ops_doc, merged)
+        let filename = schema_stem(op_path) <> resolver_suffix <> ".gleam"
+        let dest = out_path <> filename
+        use _ <- result.try(ensure_dir(out_path))
+        use written <- result.try(write_with_policy(
+          dest,
+          generated,
+          MergeNewFunctions,
+        ))
+        let msg = case written {
+          True -> "Generated operations: " <> dest
+          False -> "Generated operations (up to date): " <> dest
+        }
+        Ok([msg, ..msgs])
+      })
+    }
+    _, _ -> Ok(messages)
   })
 
   // SDL — always single file (merging makes sense here)
@@ -885,6 +925,19 @@ fn format_error(err: CliError) -> String {
     ParseError(msg) -> "Parse error: " <> msg
     WriteError(path, reason) -> "Error writing '" <> path <> "': " <> reason
     InvalidArgs(msg) -> msg
+  }
+}
+
+fn format_op_parse_error(err: mochi_parser.ParseError) -> String {
+  case err {
+    mochi_parser.UnexpectedToken(expected, _, pos) ->
+      "Unexpected token at line "
+      <> int.to_string(pos.line)
+      <> ", expected "
+      <> expected
+    mochi_parser.UnexpectedEOF(expected) ->
+      "Unexpected end of file, expected " <> expected
+    mochi_parser.LexError(_) -> "Lexer error"
   }
 }
 

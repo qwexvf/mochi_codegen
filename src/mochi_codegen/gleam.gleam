@@ -2,10 +2,10 @@ import gleam/list
 import gleam/option.{Some}
 import gleam/string
 import mochi/sdl_ast.{
-  type ArgumentDef, type EnumTypeDef, type EnumValueDef, type FieldDef,
-  type InputFieldDef, type InputObjectTypeDef, type InterfaceTypeDef,
-  type ObjectTypeDef, type SDLDocument, type SDLType, type ScalarTypeDef,
-  type TypeDef, type UnionTypeDef,
+  type EnumTypeDef, type EnumValueDef, type FieldDef, type InputFieldDef,
+  type InputObjectTypeDef, type InterfaceTypeDef, type ObjectTypeDef,
+  type SDLDocument, type SDLType, type ScalarTypeDef, type TypeDef,
+  type UnionTypeDef,
 }
 
 pub type GleamGenConfig {
@@ -152,12 +152,7 @@ fn collect_types_in_def(td: TypeDef) -> List(String) {
   case td {
     sdl_ast.ObjectTypeDefinition(obj) ->
       list.flat_map(obj.fields, fn(f) {
-        let return_types = collect_named_in_sdl_type(f.field_type)
-        let arg_types =
-          list.flat_map(f.arguments, fn(a: ArgumentDef) {
-            collect_named_in_sdl_type(a.arg_type)
-          })
-        list.append(return_types, arg_types)
+        collect_named_in_sdl_type(f.field_type)
       })
     sdl_ast.InputObjectTypeDefinition(input) ->
       list.flat_map(input.fields, fn(f) {
@@ -295,19 +290,7 @@ fn generate_resolvers_impl(
 
   let imports = option_import <> extra_imports <> type_imports <> "\n"
 
-  let resolvers =
-    doc.definitions
-    |> list.filter_map(fn(def) {
-      case def {
-        sdl_ast.TypeDefinition(sdl_ast.ObjectTypeDefinition(obj)) ->
-          Ok(generate_object_resolvers(obj, config))
-        _ -> Error(Nil)
-      }
-    })
-    |> list.filter(fn(s) { s != "" })
-    |> string.join("\n\n")
-
-  header <> imports <> resolvers
+  header <> imports
 }
 
 fn resolver_needs_option(doc: SDLDocument) -> Bool {
@@ -457,71 +440,6 @@ fn generate_scalar_type(scalar: ScalarTypeDef, config: GleamGenConfig) -> String
   }
 
   doc <> "pub type " <> scalar.name <> " =\n  String"
-}
-
-// Resolver generators
-
-fn generate_object_resolvers(
-  obj: ObjectTypeDef,
-  config: GleamGenConfig,
-) -> String {
-  case obj.name {
-    "Query" | "Mutation" | "Subscription" ->
-      generate_root_resolvers(obj, config)
-    _ -> ""
-  }
-}
-
-fn generate_root_resolvers(obj: ObjectTypeDef, config: GleamGenConfig) -> String {
-  let header = "// " <> obj.name <> " resolvers\n"
-
-  let resolvers =
-    obj.fields
-    |> list.map(fn(field) { generate_field_resolver(obj.name, field, config) })
-    |> string.join("\n\n")
-
-  header <> resolvers
-}
-
-fn generate_field_resolver(
-  _parent_name: String,
-  field: FieldDef,
-  config: GleamGenConfig,
-) -> String {
-  let fn_name = "resolve_" <> to_snake_case(field.name)
-  let return_type = sdl_type_to_gleam(field.field_type)
-
-  let args_params = case field.arguments {
-    [] -> ""
-    args ->
-      ", "
-      <> {
-        args
-        |> list.map(fn(arg) {
-          to_snake_case(arg.name) <> ": " <> sdl_type_to_gleam(arg.arg_type)
-        })
-        |> string.join(", ")
-      }
-  }
-
-  let doc = case config.generate_docs, field.description {
-    True, Some(desc) -> "/// " <> desc <> "\n"
-    _, _ -> ""
-  }
-
-  doc
-  <> "pub fn "
-  <> fn_name
-  <> "(ctx: ExecutionContext"
-  <> args_params
-  <> ") -> Result("
-  <> return_type
-  <> ", String) {\n"
-  <> "  // TODO: Implement resolver\n"
-  <> "  Error(\"Not implemented: "
-  <> fn_name
-  <> "\")\n"
-  <> "}"
 }
 
 // Type conversion helpers
