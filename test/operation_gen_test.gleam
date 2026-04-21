@@ -64,7 +64,6 @@ type User { id: ID! }",
   out
   |> contains("result.try(query.get_id(args, \"targetId\"))")
   |> should.be_true
-  out |> contains("Ok(#(user_id, target_id))") |> should.be_true
 }
 
 pub fn multi_var_with_input_type_uses_decode_not_get_string_test() {

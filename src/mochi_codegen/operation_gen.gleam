@@ -17,12 +17,9 @@ pub fn generate(ops_doc: ast.Document, schema_doc: SDLDocument) -> String {
   case operations {
     [] -> ""
     ops -> {
-      let needs_dict =
-        list.any(ops, fn(op) {
-          has_input_arg(op, schema_doc) || count_vars(op) >= 2
-        })
+      let needs_dict = list.any(ops, fn(op) { has_input_arg(op, schema_doc) })
       let needs_list = list.any(ops, has_list_return(_, schema_doc))
-      let needs_result = list.any(ops, fn(op) { count_vars(op) >= 2 })
+      let needs_result = list.any(ops, fn(op) { count_vars(op) >= 1 })
       let encoder_types = collect_encoder_types(ops, schema_doc)
       let needs_dynamic = needs_dict || encoder_types != []
       let needs_none = list.any(ops, has_nullable_input_field(_, schema_doc))
@@ -53,6 +50,7 @@ pub fn generate(ops_doc: ast.Document, schema_doc: SDLDocument) -> String {
             True -> Some("import gleam/result")
             False -> None
           },
+          Some("import mochi/error"),
           Some("import mochi/query"),
           Some("import mochi/schema"),
           Some("import mochi/types"),
@@ -148,7 +146,6 @@ fn generate_op(op: ast.Operation, schema_doc: SDLDocument) -> String {
   let is_scalar_return = is_scalar(inner_name)
 
   let args_str = generate_args(vars)
-  let decode_str = generate_decode(vars, schema_doc)
   let resolve_str = generate_resolve(vars, root_field, schema_doc)
   let encode_str = case is_scalar_return {
     True -> "fn(v) { types.to_dynamic(v) }"
@@ -185,19 +182,16 @@ fn generate_op(op: ast.Operation, schema_doc: SDLDocument) -> String {
       <> "    returns: "
       <> return_type_str
       <> ",\n"
-      <> "    decode: "
-      <> decode_str
-      <> ",\n"
       <> "    topic: fn(_, _ctx) {\n"
       <> "      // TODO: return subscription topic string\n"
-      <> "      Error(\"Not implemented: "
+      <> "      Error(error.new(\"Not implemented: "
       <> root_field
-      <> " topic\")\n"
+      <> " topic\"))\n"
       <> "    },\n"
-      <> "    encode: "
-      <> encode_str
-      <> ",\n"
       <> "  )\n"
+      <> "  |> query.with_encoder("
+      <> encode_str
+      <> ")\n"
       <> "}"
     _ ->
       "fn "
@@ -215,16 +209,13 @@ fn generate_op(op: ast.Operation, schema_doc: SDLDocument) -> String {
       <> "    returns: "
       <> return_type_str
       <> ",\n"
-      <> "    decode: "
-      <> decode_str
-      <> ",\n"
       <> "    resolve: "
       <> resolve_str
       <> ",\n"
-      <> "    encode: "
-      <> encode_str
-      <> ",\n"
       <> "  )\n"
+      <> "  |> query.with_encoder("
+      <> encode_str
+      <> ")\n"
       <> "}"
   }
 }
@@ -243,243 +234,116 @@ fn generate_args(vars: List(ast.VariableDefinition)) -> String {
   |> string.join(", ")
 }
 
-// ── Decode block ──────────────────────────────────────────────────────────────
-
-fn generate_decode(
-  vars: List(ast.VariableDefinition),
-  schema_doc: SDLDocument,
-) -> String {
-  case vars {
-    [] -> "fn(_args) { Ok(Nil) }"
-    [v] -> {
-      let type_name = ast_inner_type_name(v.type_)
-      case is_input_type(type_name, schema_doc) {
-        True -> generate_input_decode_block(v.variable, type_name, schema_doc)
-        False -> {
-          let helper = scalar_to_helper(type_name)
-          "fn(args) { query." <> helper <> "(args, \"" <> v.variable <> "\") }"
-        }
-      }
-    }
-    vs -> {
-      let lines =
-        list.map(vs, fn(v) {
-          let type_name = ast_inner_type_name(v.type_)
-          case is_input_type(type_name, schema_doc) {
-            True ->
-              generate_multi_input_decode_line(
-                v.variable,
-                type_name,
-                schema_doc,
-              )
-            False -> {
-              let helper = scalar_to_helper(type_name)
-              "      use "
-              <> to_snake_case(v.variable)
-              <> " <- result.try(query."
-              <> helper
-              <> "(args, \""
-              <> v.variable
-              <> "\"))"
-            }
-          }
-        })
-      let names =
-        list.map(vs, fn(v) { to_snake_case(v.variable) }) |> string.join(", ")
-      let tuple = case vs {
-        [_] -> names
-        _ -> "#(" <> names <> ")"
-      }
-      "fn(args: dict.Dict(String, Dynamic)) {\n"
-      <> string.join(lines, "\n")
-      <> "\n      Ok("
-      <> tuple
-      <> ")\n    }"
-    }
-  }
-}
-
-fn generate_input_decode_block(
-  arg_name: String,
-  type_name: String,
-  schema_doc: SDLDocument,
-) -> String {
-  let fields = find_input_fields(type_name, schema_doc)
-  let field_lines =
-    list.map(fields, fn(f) {
-      let is_nonnull = sdl_is_nonnull(f.field_type)
-      let inner = sdl_inner_type_name(f.field_type)
-      let dec = scalar_to_decode_fn(inner)
-      case is_nonnull {
-        True ->
-          "            use "
-          <> to_snake_case(f.name)
-          <> " <- decode.field(\""
-          <> f.name
-          <> "\", "
-          <> dec
-          <> ")"
-        False ->
-          "            use "
-          <> to_snake_case(f.name)
-          <> " <- decode.optional_field(\""
-          <> f.name
-          <> "\", None, types.nullable("
-          <> dec
-          <> "))"
-      }
-    })
-    |> string.join("\n")
-
-  let names =
-    list.map(fields, fn(f) { to_snake_case(f.name) }) |> string.join(", ")
-  let tuple = case fields {
-    [_] -> names
-    _ -> "#(" <> names <> ")"
-  }
-
-  "fn(args: dict.Dict(String, Dynamic)) {\n"
-  <> "      case dict.get(args, \""
-  <> arg_name
-  <> "\") {\n"
-  <> "        Ok(input_dyn) -> {\n"
-  <> "          let decoder = {\n"
-  <> field_lines
-  <> "\n"
-  <> "            decode.success("
-  <> tuple
-  <> ")\n"
-  <> "          }\n"
-  <> "          case decode.run(input_dyn, decoder) {\n"
-  <> "            Ok(input) -> Ok(input)\n"
-  <> "            Error(_) -> Error(\"Invalid "
-  <> type_name
-  <> "\")\n"
-  <> "          }\n"
-  <> "        }\n"
-  <> "        Error(_) -> Error(\"Missing input argument\")\n"
-  <> "      }\n"
-  <> "    }"
-}
-
-fn generate_multi_input_decode_line(
-  arg_name: String,
-  type_name: String,
-  schema_doc: SDLDocument,
-) -> String {
-  let fields = find_input_fields(type_name, schema_doc)
-  let field_lines =
-    list.map(fields, fn(f) {
-      let is_nonnull = sdl_is_nonnull(f.field_type)
-      let inner = sdl_inner_type_name(f.field_type)
-      let dec = scalar_to_decode_fn(inner)
-      case is_nonnull {
-        True ->
-          "              use "
-          <> to_snake_case(f.name)
-          <> " <- decode.field(\""
-          <> f.name
-          <> "\", "
-          <> dec
-          <> ")"
-        False ->
-          "              use "
-          <> to_snake_case(f.name)
-          <> " <- decode.optional_field(\""
-          <> f.name
-          <> "\", None, types.nullable("
-          <> dec
-          <> "))"
-      }
-    })
-    |> string.join("\n")
-  let names =
-    list.map(fields, fn(f) { to_snake_case(f.name) }) |> string.join(", ")
-  let tuple = case fields {
-    [_] -> names
-    _ -> "#(" <> names <> ")"
-  }
-  "      use "
-  <> to_snake_case(arg_name)
-  <> " <- result.try(case dict.get(args, \""
-  <> arg_name
-  <> "\") {\n"
-  <> "        Ok(dyn_) -> {\n"
-  <> "          let decoder = {\n"
-  <> field_lines
-  <> "\n"
-  <> "            decode.success("
-  <> tuple
-  <> ")\n"
-  <> "          }\n"
-  <> "          case decode.run(dyn_, decoder) {\n"
-  <> "            Ok(val) -> Ok(val)\n"
-  <> "            Error(_) -> Error(\"Invalid "
-  <> type_name
-  <> "\")\n"
-  <> "          }\n"
-  <> "        }\n"
-  <> "        Error(_) -> Error(\"Missing input argument\")\n"
-  <> "      })"
-}
-
-// ── Resolve lambda ────────────────────────────────────────────────────────────
+// ── Resolve lambda (with inlined arg parsing) ─────────────────────────────────
 
 fn generate_resolve(
   vars: List(ast.VariableDefinition),
   field_name: String,
   schema_doc: SDLDocument,
 ) -> String {
-  let todo_body =
+  let todo_lines =
     "      // TODO: implement "
     <> field_name
     <> " resolver\n"
-    <> "      Error(\"Not implemented: "
+    <> "      Error(error.new(\"Not implemented: "
     <> field_name
-    <> "\")"
+    <> "\"))"
 
   case vars {
-    [] -> "fn(_args, _ctx) {\n" <> todo_body <> "\n    }"
-    [v] -> {
-      let type_name = ast_inner_type_name(v.type_)
-      case is_input_type(type_name, schema_doc) {
-        True -> {
-          let fields = find_input_fields(type_name, schema_doc)
-          let names =
-            list.map(fields, fn(f) { "_" <> to_snake_case(f.name) })
-            |> string.join(", ")
-          let pat = case fields {
-            [_] -> names
-            _ -> "#(" <> names <> ")"
+    [] -> "fn(_args, _ctx) {\n" <> todo_lines <> "\n    }"
+    _ -> {
+      let use_lines =
+        list.flat_map(vars, fn(v) {
+          let type_name = ast_inner_type_name(v.type_)
+          case is_input_type(type_name, schema_doc) {
+            False -> {
+              let helper = scalar_to_helper(type_name)
+              [
+                "      use "
+                <> to_snake_case(v.variable)
+                <> " <- result.try(query."
+                <> helper
+                <> "(args, \""
+                <> v.variable
+                <> "\"))",
+              ]
+            }
+            True -> generate_input_use_lines(v.variable, type_name, schema_doc)
           }
-          "fn(input, _ctx) {\n"
-          <> "      let "
-          <> pat
-          <> " = input\n"
-          <> todo_body
-          <> "\n    }"
-        }
-        False ->
-          "fn(_"
-          <> to_snake_case(v.variable)
-          <> ", _ctx) {\n"
-          <> todo_body
-          <> "\n    }"
-      }
-    }
-    vs -> {
-      let names =
-        list.map(vs, fn(v) { "_" <> to_snake_case(v.variable) })
-        |> string.join(", ")
-      let pat = "#(" <> names <> ")"
-      "fn(input, _ctx) {\n"
-      <> "      let "
-      <> pat
-      <> " = input\n"
-      <> todo_body
+        })
+      "fn(args, _ctx) {\n"
+      <> string.join(use_lines, "\n")
+      <> "\n"
+      <> todo_lines
       <> "\n    }"
     }
   }
+}
+
+fn generate_input_use_lines(
+  arg_name: String,
+  type_name: String,
+  schema_doc: SDLDocument,
+) -> List(String) {
+  let dyn_var = to_snake_case(arg_name) <> "_dyn"
+  let fields = find_input_fields(type_name, schema_doc)
+  let field_lines =
+    list.map(fields, fn(f) {
+      let is_nonnull = sdl_is_nonnull(f.field_type)
+      let inner = sdl_inner_type_name(f.field_type)
+      let dec = scalar_to_decode_fn(inner)
+      case is_nonnull {
+        True ->
+          "        use "
+          <> to_snake_case(f.name)
+          <> " <- decode.field(\""
+          <> f.name
+          <> "\", "
+          <> dec
+          <> ")"
+        False ->
+          "        use "
+          <> to_snake_case(f.name)
+          <> " <- decode.optional_field(\""
+          <> f.name
+          <> "\", None, types.nullable("
+          <> dec
+          <> "))"
+      }
+    })
+    |> string.join("\n")
+  let names =
+    list.map(fields, fn(f) { to_snake_case(f.name) }) |> string.join(", ")
+  let tuple = case fields {
+    [_] -> names
+    _ -> "#(" <> names <> ")"
+  }
+  let pat = case fields {
+    [_] -> "_" <> names
+    _ ->
+      "#("
+      <> string.join(
+        list.map(fields, fn(f) { "_" <> to_snake_case(f.name) }),
+        ", ",
+      )
+      <> ")"
+  }
+  [
+    "      use " <> dyn_var <> " <- result.try(",
+    "        dict.get(args, \"" <> arg_name <> "\")",
+    "        |> result.map_error(fn(_) { error.new(\"Missing input argument\") }),",
+    "      )",
+    "      let decoder = {",
+    field_lines,
+    "        decode.success(" <> tuple <> ")",
+    "      }",
+    "      use " <> pat <> " <- result.try(",
+    "        decode.run(" <> dyn_var <> ", decoder)",
+    "        |> result.map_error(fn(_) { error.new(\"Invalid "
+      <> type_name
+      <> "\") }),",
+    "      )",
+  ]
 }
 
 // ── Encoders ──────────────────────────────────────────────────────────────────
