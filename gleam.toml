@@ -1,5 +1,5 @@
 name = "mochi_codegen"
-version = "0.1.0"
+version = "0.2.0"
 description = "Code generation (TypeScript, SDL, Gleam) and CLI for mochi GraphQL"
 licences = ["Apache-2.0"]
 repository = { type = "github", user = "qwexvf", repo = "mochi" }
