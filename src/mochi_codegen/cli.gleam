@@ -6,6 +6,7 @@ import gleam/result
 import gleam/string
 import mochi/parser as mochi_parser
 import mochi/schema.{type Schema}
+import gleam/dict
 import mochi/sdl_ast.{type SDLDocument, SDLDocument}
 import mochi/sdl_parser
 import mochi_codegen/config
@@ -490,8 +491,237 @@ pub fn read_and_merge_schemas(
       paths
       |> list.try_map(read_and_parse_schema)
       |> result.map(fn(docs) {
-        SDLDocument(definitions: list.flat_map(docs, fn(d) { d.definitions }))
+        let defs = list.flat_map(docs, fn(d) { d.definitions })
+        SDLDocument(definitions: apply_extensions(defs))
       })
+  }
+}
+
+fn apply_extensions(
+  defs: List(sdl_ast.TypeSystemDefinition),
+) -> List(sdl_ast.TypeSystemDefinition) {
+  let #(base_defs, extensions) =
+    list.partition(defs, fn(def) {
+      case def {
+        sdl_ast.TypeExtension(_) -> False
+        _ -> True
+      }
+    })
+
+  let ext_map =
+    list.fold(extensions, dict.new(), fn(acc, def) {
+      case def {
+        sdl_ast.TypeExtension(ext) ->
+          dict.upsert(acc, sdl_ast.get_extension_name(ext), fn(existing) {
+            case existing {
+              option.None -> [ext]
+              option.Some(exts) -> list.append(exts, [ext])
+            }
+          })
+        _ -> acc
+      }
+    })
+
+  let merged =
+    list.map(base_defs, fn(def) {
+      case def {
+        sdl_ast.TypeDefinition(type_def) -> {
+          let name = sdl_ast.get_type_name(type_def)
+          case dict.get(ext_map, name) {
+            Error(_) -> def
+            Ok(exts) ->
+              sdl_ast.TypeDefinition(merge_extensions(type_def, exts))
+          }
+        }
+        _ -> def
+      }
+    })
+
+  let merged_names =
+    list.filter_map(merged, fn(def) {
+      case def {
+        sdl_ast.TypeDefinition(type_def) -> Ok(sdl_ast.get_type_name(type_def))
+        _ -> Error(Nil)
+      }
+    })
+
+  let orphan_map =
+    list.fold(extensions, dict.new(), fn(acc, def) {
+      case def {
+        sdl_ast.TypeExtension(ext) -> {
+          let name = sdl_ast.get_extension_name(ext)
+          case list.contains(merged_names, name) {
+            True -> acc
+            False ->
+              dict.upsert(acc, name, fn(existing) {
+                case existing {
+                  option.None -> [ext]
+                  option.Some(exts) -> list.append(exts, [ext])
+                }
+              })
+          }
+        }
+        _ -> acc
+      }
+    })
+
+  let orphans =
+    dict.values(orphan_map)
+    |> list.filter_map(fn(exts) {
+      case exts {
+        [] -> Error(Nil)
+        [first, ..rest] ->
+          Ok(sdl_ast.TypeDefinition(
+            merge_extensions(extension_to_type_def(first), rest),
+          ))
+      }
+    })
+
+  list.append(merged, orphans)
+}
+
+fn merge_extensions(
+  type_def: sdl_ast.TypeDef,
+  exts: List(sdl_ast.TypeExtensionDef),
+) -> sdl_ast.TypeDef {
+  list.fold(exts, type_def, fn(td, ext) {
+    case td, ext {
+      sdl_ast.ObjectTypeDefinition(obj), sdl_ast.ObjectTypeExtension(
+        _,
+        interfaces,
+        directives,
+        fields,
+      ) -> {
+        let new_fields =
+          list.filter(fields, fn(f) {
+            !list.any(obj.fields, fn(existing) { existing.name == f.name })
+          })
+        let new_interfaces =
+          list.filter(interfaces, fn(i) { !list.contains(obj.interfaces, i) })
+        sdl_ast.ObjectTypeDefinition(sdl_ast.ObjectTypeDef(
+          ..obj,
+          interfaces: list.append(obj.interfaces, new_interfaces),
+          directives: list.append(obj.directives, directives),
+          fields: list.append(obj.fields, new_fields),
+        ))
+      }
+      sdl_ast.InterfaceTypeDefinition(iface), sdl_ast.InterfaceTypeExtension(
+        _,
+        directives,
+        fields,
+      ) -> {
+        let new_fields =
+          list.filter(fields, fn(f) {
+            !list.any(iface.fields, fn(existing) { existing.name == f.name })
+          })
+        sdl_ast.InterfaceTypeDefinition(sdl_ast.InterfaceTypeDef(
+          ..iface,
+          directives: list.append(iface.directives, directives),
+          fields: list.append(iface.fields, new_fields),
+        ))
+      }
+      sdl_ast.UnionTypeDefinition(union), sdl_ast.UnionTypeExtension(
+        _,
+        directives,
+        member_types,
+      ) -> {
+        let new_members =
+          list.filter(member_types, fn(m) {
+            !list.contains(union.member_types, m)
+          })
+        sdl_ast.UnionTypeDefinition(sdl_ast.UnionTypeDef(
+          ..union,
+          directives: list.append(union.directives, directives),
+          member_types: list.append(union.member_types, new_members),
+        ))
+      }
+      sdl_ast.EnumTypeDefinition(enum_def), sdl_ast.EnumTypeExtension(
+        _,
+        directives,
+        values,
+      ) -> {
+        let new_values =
+          list.filter(values, fn(v) {
+            !list.any(enum_def.values, fn(existing) { existing.name == v.name })
+          })
+        sdl_ast.EnumTypeDefinition(sdl_ast.EnumTypeDef(
+          ..enum_def,
+          directives: list.append(enum_def.directives, directives),
+          values: list.append(enum_def.values, new_values),
+        ))
+      }
+      sdl_ast.InputObjectTypeDefinition(input), sdl_ast.InputObjectTypeExtension(
+        _,
+        directives,
+        fields,
+      ) -> {
+        let new_fields =
+          list.filter(fields, fn(f) {
+            !list.any(input.fields, fn(existing) { existing.name == f.name })
+          })
+        sdl_ast.InputObjectTypeDefinition(sdl_ast.InputObjectTypeDef(
+          ..input,
+          directives: list.append(input.directives, directives),
+          fields: list.append(input.fields, new_fields),
+        ))
+      }
+      sdl_ast.ScalarTypeDefinition(scalar), sdl_ast.ScalarTypeExtension(
+        _,
+        directives,
+      ) ->
+        sdl_ast.ScalarTypeDefinition(sdl_ast.ScalarTypeDef(
+          ..scalar,
+          directives: list.append(scalar.directives, directives),
+        ))
+      _, _ -> td
+    }
+  })
+}
+
+fn extension_to_type_def(ext: sdl_ast.TypeExtensionDef) -> sdl_ast.TypeDef {
+  case ext {
+    sdl_ast.ObjectTypeExtension(name, interfaces, directives, fields) ->
+      sdl_ast.ObjectTypeDefinition(sdl_ast.ObjectTypeDef(
+        name: name,
+        description: option.None,
+        interfaces: interfaces,
+        directives: directives,
+        fields: fields,
+      ))
+    sdl_ast.InterfaceTypeExtension(name, directives, fields) ->
+      sdl_ast.InterfaceTypeDefinition(sdl_ast.InterfaceTypeDef(
+        name: name,
+        description: option.None,
+        directives: directives,
+        fields: fields,
+      ))
+    sdl_ast.UnionTypeExtension(name, directives, member_types) ->
+      sdl_ast.UnionTypeDefinition(sdl_ast.UnionTypeDef(
+        name: name,
+        description: option.None,
+        directives: directives,
+        member_types: member_types,
+      ))
+    sdl_ast.EnumTypeExtension(name, directives, values) ->
+      sdl_ast.EnumTypeDefinition(sdl_ast.EnumTypeDef(
+        name: name,
+        description: option.None,
+        directives: directives,
+        values: values,
+      ))
+    sdl_ast.InputObjectTypeExtension(name, directives, fields) ->
+      sdl_ast.InputObjectTypeDefinition(sdl_ast.InputObjectTypeDef(
+        name: name,
+        description: option.None,
+        directives: directives,
+        fields: fields,
+      ))
+    sdl_ast.ScalarTypeExtension(name, directives) ->
+      sdl_ast.ScalarTypeDefinition(sdl_ast.ScalarTypeDef(
+        name: name,
+        description: option.None,
+        directives: directives,
+      ))
   }
 }
 
