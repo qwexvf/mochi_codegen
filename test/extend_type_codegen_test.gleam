@@ -17,10 +17,7 @@ fn merge(sdl_list: List(String)) -> sdl_ast.SDLDocument {
   }
 }
 
-fn find_type(
-  doc: sdl_ast.SDLDocument,
-  name: String,
-) -> sdl_ast.TypeDef {
+fn find_type(doc: sdl_ast.SDLDocument, name: String) -> sdl_ast.TypeDef {
   case
     list.find(doc.definitions, fn(def) {
       case def {
@@ -93,6 +90,49 @@ pub fn multiple_orphan_extensions_merge_into_one_type_test() {
       let assert 2 = list.length(obj.fields)
     }
     _ -> panic as "Expected ObjectTypeDefinition"
+  }
+}
+
+pub fn extend_interface_merges_fields_test() {
+  let doc =
+    merge([
+      "interface Node { id: ID! }",
+      "extend interface Node { createdAt: String }",
+    ])
+  case find_type(doc, "Node") {
+    sdl_ast.InterfaceTypeDefinition(iface) -> {
+      let assert 2 = list.length(iface.fields)
+    }
+    _ -> panic as "Expected InterfaceTypeDefinition"
+  }
+}
+
+pub fn extend_input_merges_fields_test() {
+  let doc =
+    merge([
+      "input CreateUserInput { name: String! }",
+      "extend input CreateUserInput { email: String }",
+    ])
+  case find_type(doc, "CreateUserInput") {
+    sdl_ast.InputObjectTypeDefinition(input) -> {
+      let assert 2 = list.length(input.fields)
+    }
+    _ -> panic as "Expected InputObjectTypeDefinition"
+  }
+}
+
+pub fn extend_union_directives_only_test() {
+  let doc =
+    merge([
+      "union SearchResult = User | Post",
+      "extend union SearchResult @deprecated",
+    ])
+  case find_type(doc, "SearchResult") {
+    sdl_ast.UnionTypeDefinition(u) -> {
+      let assert 2 = list.length(u.member_types)
+      let assert 1 = list.length(u.directives)
+    }
+    _ -> panic as "Expected UnionTypeDefinition"
   }
 }
 
