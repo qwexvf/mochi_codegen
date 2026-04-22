@@ -21,9 +21,8 @@ pub fn typescript_generation_test() {
     types.object("User")
     |> types.description("A user in the system")
     |> types.id("id", fn(u: User) { u.id })
-    |> types.string_with_desc("name", "The user's display name", fn(u: User) {
-      u.name
-    })
+    |> types.string("name", fn(u: User) { u.name })
+    |> types.field_description("The user's display name")
     |> types.string("email", fn(u: User) { u.email })
     |> types.int("age", fn(u: User) { u.age })
     |> types.build(decode_user)
@@ -85,7 +84,8 @@ pub fn main() {
     types.object("User")
     |> types.description("A user in the system")
     |> types.id("id", fn(u: User) { u.id })
-    |> types.string_with_desc("name", "The user's name", fn(u: User) { u.name })
+    |> types.string("name", fn(u: User) { u.name })
+    |> types.field_description("The user's name")
     |> types.string("email", fn(u: User) { u.email })
     |> types.int("age", fn(u: User) { u.age })
     |> types.build(decode_user)

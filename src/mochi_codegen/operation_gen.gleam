@@ -161,7 +161,7 @@ fn generate_op(op: ast.Operation, schema_doc: SDLDocument) -> String {
 
   let add_fn = case op_type {
     ast.Query -> "query.query_with_args"
-    ast.Mutation -> "query.mutation"
+    ast.Mutation -> "query.mutation_with_args"
     ast.Subscription -> "query.subscription_with_args"
   }
 

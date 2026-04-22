@@ -21,7 +21,8 @@ pub fn sdl_generation_test() {
     types.object("User")
     |> types.description("A user in the system")
     |> types.id("id", fn(u: User) { u.id })
-    |> types.string_with_desc("name", "The user's name", fn(u: User) { u.name })
+    |> types.string("name", fn(u: User) { u.name })
+    |> types.field_description("The user's name")
     |> types.build(decode_user)
 
   let role_enum =
@@ -126,7 +127,7 @@ pub fn sdl_deprecated_field_test() {
     schema.object("Query")
     |> schema.field(
       schema.field_def("oldUsers", schema.list_type(schema.named_type("User")))
-      |> schema.deprecate("Use users instead")
+      |> schema.deprecated("Use users instead")
       |> schema.resolver(fn(_) { Error("test") }),
     )
     |> schema.field(
@@ -193,9 +194,8 @@ pub fn main() {
     types.object("User")
     |> types.description("A user in the system")
     |> types.id("id", fn(u: User) { u.id })
-    |> types.string_with_desc("name", "The user's display name", fn(u: User) {
-      u.name
-    })
+    |> types.string("name", fn(u: User) { u.name })
+    |> types.field_description("The user's display name")
     |> types.build(decode_user)
 
   let role_enum =
