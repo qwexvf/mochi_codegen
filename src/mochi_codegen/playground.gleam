@@ -183,7 +183,7 @@ pub fn simple_explorer(endpoint: String) -> String {
     textarea {
       flex: 1; background: #1a1a2e; color: #eee; border: none;
       font-family: 'Monaco', 'Menlo', monospace; font-size: 14px;
-      padding: 1rem; resize: vertical; outline: none;
+      padding: 1rem; resize: none; outline: none;
     }
     .divider { width: 4px; background: #0f3460; cursor: col-resize; }
     button {
