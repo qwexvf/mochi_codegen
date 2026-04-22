@@ -684,7 +684,14 @@ fn merge_extensions(
             directives: list.append(scalar.directives, directives),
           ),
         )
-      _, _ -> td
+      _, _ -> {
+        io.println_error(
+          "warning: extension kind does not match base type '"
+          <> sdl_ast.get_extension_name(ext)
+          <> "', skipping",
+        )
+        td
+      }
     }
   })
 }
