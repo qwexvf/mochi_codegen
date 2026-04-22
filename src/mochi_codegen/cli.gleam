@@ -515,7 +515,7 @@ fn apply_extensions(
           dict.upsert(acc, sdl_ast.get_extension_name(ext), fn(existing) {
             case existing {
               option.None -> [ext]
-              option.Some(exts) -> list.append(exts, [ext])
+              option.Some(exts) -> [ext, ..exts]
             }
           })
         _ -> acc
@@ -529,7 +529,11 @@ fn apply_extensions(
           let name = sdl_ast.get_type_name(type_def)
           case dict.get(ext_map, name) {
             Error(_) -> def
-            Ok(exts) -> sdl_ast.TypeDefinition(merge_extensions(type_def, exts))
+            Ok(exts) ->
+              sdl_ast.TypeDefinition(merge_extensions(
+                type_def,
+                list.reverse(exts),
+              ))
           }
         }
         _ -> def
@@ -556,7 +560,7 @@ fn apply_extensions(
               dict.upsert(acc, name, fn(existing) {
                 case existing {
                   option.None -> [ext]
-                  option.Some(exts) -> list.append(exts, [ext])
+                  option.Some(exts) -> [ext, ..exts]
                 }
               })
           }
@@ -569,7 +573,7 @@ fn apply_extensions(
     dict.to_list(orphan_map)
     |> list.sort(fn(a, b) { string.compare(a.0, b.0) })
     |> list.filter_map(fn(pair) {
-      case pair.1 {
+      case list.reverse(pair.1) {
         [] -> Error(Nil)
         [first, ..rest] ->
           Ok(
@@ -584,6 +588,10 @@ fn apply_extensions(
   list.append(merged, orphans)
 }
 
+fn name_set(names: List(String)) -> dict.Dict(String, Nil) {
+  list.fold(names, dict.new(), fn(acc, n) { dict.insert(acc, n, Nil) })
+}
+
 fn merge_extensions(
   type_def: sdl_ast.TypeDef,
   exts: List(sdl_ast.TypeExtensionDef),
@@ -593,12 +601,14 @@ fn merge_extensions(
       sdl_ast.ObjectTypeDefinition(obj),
         sdl_ast.ObjectTypeExtension(_, interfaces, directives, fields)
       -> {
+        let existing_fields = name_set(list.map(obj.fields, fn(f) { f.name }))
+        let existing_interfaces = name_set(obj.interfaces)
         let new_fields =
-          list.filter(fields, fn(f) {
-            !list.any(obj.fields, fn(existing) { existing.name == f.name })
-          })
+          list.filter(fields, fn(f) { !dict.has_key(existing_fields, f.name) })
         let new_interfaces =
-          list.filter(interfaces, fn(i) { !list.contains(obj.interfaces, i) })
+          list.filter(interfaces, fn(i) {
+            !dict.has_key(existing_interfaces, i)
+          })
         sdl_ast.ObjectTypeDefinition(
           sdl_ast.ObjectTypeDef(
             ..obj,
@@ -611,10 +621,9 @@ fn merge_extensions(
       sdl_ast.InterfaceTypeDefinition(iface),
         sdl_ast.InterfaceTypeExtension(_, directives, fields)
       -> {
+        let existing_fields = name_set(list.map(iface.fields, fn(f) { f.name }))
         let new_fields =
-          list.filter(fields, fn(f) {
-            !list.any(iface.fields, fn(existing) { existing.name == f.name })
-          })
+          list.filter(fields, fn(f) { !dict.has_key(existing_fields, f.name) })
         sdl_ast.InterfaceTypeDefinition(
           sdl_ast.InterfaceTypeDef(
             ..iface,
@@ -626,10 +635,9 @@ fn merge_extensions(
       sdl_ast.UnionTypeDefinition(union),
         sdl_ast.UnionTypeExtension(_, directives, member_types)
       -> {
+        let existing_members = name_set(union.member_types)
         let new_members =
-          list.filter(member_types, fn(m) {
-            !list.contains(union.member_types, m)
-          })
+          list.filter(member_types, fn(m) { !dict.has_key(existing_members, m) })
         sdl_ast.UnionTypeDefinition(
           sdl_ast.UnionTypeDef(
             ..union,
@@ -641,10 +649,10 @@ fn merge_extensions(
       sdl_ast.EnumTypeDefinition(enum_def),
         sdl_ast.EnumTypeExtension(_, directives, values)
       -> {
+        let existing_values =
+          name_set(list.map(enum_def.values, fn(v) { v.name }))
         let new_values =
-          list.filter(values, fn(v) {
-            !list.any(enum_def.values, fn(existing) { existing.name == v.name })
-          })
+          list.filter(values, fn(v) { !dict.has_key(existing_values, v.name) })
         sdl_ast.EnumTypeDefinition(
           sdl_ast.EnumTypeDef(
             ..enum_def,
@@ -656,10 +664,9 @@ fn merge_extensions(
       sdl_ast.InputObjectTypeDefinition(input),
         sdl_ast.InputObjectTypeExtension(_, directives, fields)
       -> {
+        let existing_fields = name_set(list.map(input.fields, fn(f) { f.name }))
         let new_fields =
-          list.filter(fields, fn(f) {
-            !list.any(input.fields, fn(existing) { existing.name == f.name })
-          })
+          list.filter(fields, fn(f) { !dict.has_key(existing_fields, f.name) })
         sdl_ast.InputObjectTypeDefinition(
           sdl_ast.InputObjectTypeDef(
             ..input,
