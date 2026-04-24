@@ -19,11 +19,8 @@ pub fn e2e_codegen_from_schema_and_operations_test() {
   let assert Ok(_) =
     simplifile.create_directory_all(tmp_dir <> "/src/generated")
 
-  let mochi_path = resolve_path(cwd <> "/../mochi")
   let toml =
-    "name = \"codegen_e2e\"\nversion = \"1.0.0\"\n\n[dependencies]\ngleam_stdlib = \">= 0.44.0 and < 2.0.0\"\nmochi = { path = \""
-    <> mochi_path
-    <> "\" }\n"
+    "name = \"codegen_e2e\"\nversion = \"1.0.0\"\n\n[dependencies]\ngleam_stdlib = \">= 0.44.0 and < 2.0.0\"\nmochi = { git = \"https://github.com/qwexvf/mochi\", ref = \"main\" }\n"
   let assert Ok(_) = simplifile.write(tmp_dir <> "/gleam.toml", toml)
 
   let schema_glob = cwd <> "/test/fixtures/e2e/graphql/*.graphql"
@@ -225,9 +222,6 @@ fn get_cwd() -> String
 
 @external(erlang, "mochi_codegen_ffi", "run_command")
 fn run_command(cmd: String) -> String
-
-@external(erlang, "mochi_codegen_ffi", "resolve_path")
-fn resolve_path(path: String) -> String
 
 @external(erlang, "mochi_codegen_ffi", "unique_tmp_dir")
 fn unique_tmp_dir(prefix: String) -> String
