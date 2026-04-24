@@ -151,3 +151,26 @@ type User { id: ID! }",
   out |> contains("fn(v) { types.to_dynamic(v) }") |> should.be_true
   out |> contains("delete_user_to_dynamic") |> should.be_false
 }
+
+pub fn unknown_operation_field_reports_missing_test() {
+  let ops = parse_ops("query Missing { doesNotExist { id } }")
+  let schema =
+    parse_schema("type Query { other: String } type User { id: ID! }")
+
+  operation_gen.unknown_fields(ops, schema)
+  |> should.equal(["doesNotExist"])
+
+  let out = operation_gen.generate(ops, schema)
+  // Sentinel marker identifies the field that's missing from the schema.
+  out |> contains("<MISSING:doesNotExist>") |> should.be_true
+  // Old generic "TODO" marker is gone.
+  out |> contains("schema.Named(\"TODO\")") |> should.be_false
+}
+
+pub fn known_operation_field_has_no_unknowns_test() {
+  let ops = parse_ops("query GetUser($id: ID!) { user(id: $id) { id } }")
+  let schema =
+    parse_schema("type Query { user(id: ID!): User } type User { id: ID! }")
+
+  operation_gen.unknown_fields(ops, schema) |> should.equal([])
+}

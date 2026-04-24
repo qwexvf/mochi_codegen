@@ -117,10 +117,13 @@ pub fn default() -> Config {
 /// Serialise config to a YAML string
 pub fn to_yaml(config: Config) -> String {
   let schema_yaml = case config.schema {
-    [single] -> "schema: \"" <> single <> "\"\n"
+    [single] -> "schema: \"" <> yaml_escape(single) <> "\"\n"
     many ->
       "schema:\n"
-      <> string.join(list.map(many, fn(p) { "  - \"" <> p <> "\"" }), "\n")
+      <> string.join(
+        list.map(many, fn(p) { "  - \"" <> yaml_escape(p) <> "\"" }),
+        "\n",
+      )
       <> "\n"
   }
 
@@ -139,23 +142,26 @@ pub fn to_yaml(config: Config) -> String {
     [] -> ""
     imports ->
       "  resolver_imports:\n"
-      <> string.join(list.map(imports, fn(i) { "    - \"" <> i <> "\"" }), "\n")
+      <> string.join(
+        list.map(imports, fn(i) { "    - \"" <> yaml_escape(i) <> "\"" }),
+        "\n",
+      )
       <> "\n"
   }
 
   let gleam_yaml =
     "gleam:\n"
     <> "  types_module_prefix: \""
-    <> config.gleam.types_module_prefix
+    <> yaml_escape(config.gleam.types_module_prefix)
     <> "\"\n"
     <> "  resolvers_module_prefix: \""
-    <> config.gleam.resolvers_module_prefix
+    <> yaml_escape(config.gleam.resolvers_module_prefix)
     <> "\"\n"
     <> "  type_suffix: \""
-    <> config.gleam.type_suffix
+    <> yaml_escape(config.gleam.type_suffix)
     <> "\"\n"
     <> "  resolver_suffix: \""
-    <> config.gleam.resolver_suffix
+    <> yaml_escape(config.gleam.resolver_suffix)
     <> "\"\n"
     <> resolver_imports_yaml
     <> "  generate_docs: "
@@ -173,9 +179,16 @@ pub fn to_yaml(config: Config) -> String {
 
 fn opt_yaml_field(key: String, value: Option(String)) -> String {
   case value {
-    Some(v) -> key <> ": \"" <> v <> "\"\n"
+    Some(v) -> key <> ": \"" <> yaml_escape(v) <> "\"\n"
     None -> ""
   }
+}
+
+/// Escape a string for safe embedding in a double-quoted YAML scalar.
+fn yaml_escape(s: String) -> String {
+  s
+  |> string.replace("\\", "\\\\")
+  |> string.replace("\"", "\\\"")
 }
 
 fn bool_to_yaml(b: Bool) -> String {

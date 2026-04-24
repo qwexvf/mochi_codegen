@@ -132,6 +132,57 @@ pub fn roundtrip_custom_config_test() {
   }
 }
 
+pub fn roundtrip_config_with_special_chars_test() {
+  // Paths and prefixes that would break unescaped YAML output.
+  let conf =
+    config.Config(
+      schema: ["src/weird\"path.graphql"],
+      operations_input: Some("ops/with\\backslash.gql"),
+      output: config.OutputConfig(
+        typescript: Some("out/types\"quote\".ts"),
+        gleam_types: None,
+        resolvers: None,
+        operations: None,
+        sdl: None,
+      ),
+      gleam: config.GleamConfig(
+        types_module_prefix: "pre\"fix",
+        resolvers_module_prefix: "pre\\fix",
+        type_suffix: "_t",
+        resolver_suffix: "_r",
+        resolver_imports: ["my/weird\"import"],
+        generate_docs: True,
+      ),
+    )
+
+  let yaml = config.to_yaml(conf)
+  case config.from_yaml(yaml) {
+    Ok(parsed) -> {
+      case parsed.schema == conf.schema {
+        True -> Nil
+        False -> panic as "Schema with quote should roundtrip"
+      }
+      case parsed.operations_input == conf.operations_input {
+        True -> Nil
+        False -> panic as "operations_input with backslash should roundtrip"
+      }
+      case parsed.output.typescript == conf.output.typescript {
+        True -> Nil
+        False -> panic as "typescript path with quotes should roundtrip"
+      }
+      case parsed.gleam.types_module_prefix == conf.gleam.types_module_prefix {
+        True -> Nil
+        False -> panic as "types_module_prefix with quote should roundtrip"
+      }
+      case parsed.gleam.resolver_imports == conf.gleam.resolver_imports {
+        True -> Nil
+        False -> panic as "resolver_imports with quote should roundtrip"
+      }
+    }
+    Error(msg) -> panic as { "Special-chars roundtrip failed: " <> msg }
+  }
+}
+
 pub fn from_yaml_invalid_input_test() {
   case config.from_yaml(": invalid: {yaml") {
     Error(_) -> Nil

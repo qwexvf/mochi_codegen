@@ -2,6 +2,7 @@
 
 import gleam/io
 import gleam/string
+import gleeunit/should
 import mochi/schema
 import mochi/types
 import mochi_codegen/sdl
@@ -247,4 +248,33 @@ pub fn main() {
   io.println("Generated SDL:")
   io.println("--------------")
   io.println(sdl_code)
+}
+
+pub fn sdl_argument_default_values_test() {
+  let query_type =
+    schema.object("Query")
+    |> schema.field(
+      schema.field_def("things", schema.list_type(schema.named_type("User")))
+      |> schema.argument(
+        schema.arg("limit", schema.int_type())
+        |> schema.default_value(types.to_dynamic(10)),
+      )
+      |> schema.argument(
+        schema.arg("cursor", schema.string_type())
+        |> schema.default_value(types.to_dynamic("start")),
+      )
+      |> schema.argument(
+        schema.arg("active", schema.boolean_type())
+        |> schema.default_value(types.to_dynamic(True)),
+      )
+      |> schema.resolver(fn(_) { Error("test") }),
+    )
+
+  let test_schema = schema.schema() |> schema.query(query_type)
+  let sdl_code = sdl.generate(test_schema)
+
+  sdl_code |> string.contains("limit: Int = 10") |> should.be_true
+  sdl_code |> string.contains("cursor: String = \"start\"") |> should.be_true
+  sdl_code |> string.contains("active: Boolean = true") |> should.be_true
+  sdl_code |> string.contains("<default>") |> should.be_false
 }

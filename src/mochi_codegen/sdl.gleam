@@ -6,8 +6,13 @@
 //   // Write to file: schema.graphql
 
 import gleam/dict
+import gleam/dynamic.{type Dynamic}
+import gleam/dynamic/decode
+import gleam/float
+import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import gleam/string
 import mochi/schema.{
   type ArgumentDefinition, type DirectiveDefinition, type EnumType,
@@ -329,13 +334,47 @@ fn generate_arguments(
   |> list.map(fn(kv) {
     let #(name, arg_def) = kv
     let default = case arg_def.default_value {
-      Some(_) -> " = <default>"
-      // Note: proper default value serialization would need more work
+      Some(value) ->
+        case default_value_to_sdl(value) {
+          Ok(rendered) -> " = " <> rendered
+          // Complex defaults (lists/objects/enums) aren't representable from a
+          // type-erased Dynamic; omit rather than emit a placeholder that
+          // would break SDL parsers.
+          Error(_) -> ""
+        }
       None -> ""
     }
     name <> ": " <> field_type_to_sdl(arg_def.arg_type) <> default
   })
   |> string.join(", ")
+}
+
+fn default_value_to_sdl(value: Dynamic) -> Result(String, Nil) {
+  try_render(value, decode.bool, bool_to_sdl)
+  |> result.try_recover(fn(_) { try_render(value, decode.int, int.to_string) })
+  |> result.try_recover(fn(_) {
+    try_render(value, decode.float, float.to_string)
+  })
+  |> result.try_recover(fn(_) {
+    try_render(value, decode.string, fn(s) { "\"" <> escape_string(s) <> "\"" })
+  })
+}
+
+fn try_render(
+  value: Dynamic,
+  decoder: decode.Decoder(a),
+  render: fn(a) -> String,
+) -> Result(String, Nil) {
+  decode.run(value, decoder)
+  |> result.map(render)
+  |> result.replace_error(Nil)
+}
+
+fn bool_to_sdl(b: Bool) -> String {
+  case b {
+    True -> "true"
+    False -> "false"
+  }
 }
 
 fn generate_schema_definition(schema: Schema) -> String {
@@ -372,7 +411,13 @@ fn generate_description(
     True, Some(desc) -> {
       case string.contains(desc, "\n") {
         True ->
-          indent <> "\"\"\"\n" <> indent <> desc <> "\n" <> indent <> "\"\"\"\n"
+          indent
+          <> "\"\"\"\n"
+          <> indent
+          <> escape_block_string(desc)
+          <> "\n"
+          <> indent
+          <> "\"\"\"\n"
         False -> indent <> "\"" <> escape_string(desc) <> "\"\n"
       }
     }
@@ -385,6 +430,13 @@ fn escape_string(s: String) -> String {
   |> string.replace("\\", "\\\\")
   |> string.replace("\"", "\\\"")
   |> string.replace("\n", "\\n")
+}
+
+/// Escape a description that will be emitted inside a GraphQL block string
+/// (`"""..."""`). Per the spec the only sequence that needs escaping is the
+/// triple quote itself, rendered as `\"""`.
+fn escape_block_string(s: String) -> String {
+  string.replace(s, "\"\"\"", "\\\"\"\"")
 }
 
 fn field_type_to_sdl(field_type: FieldType) -> String {

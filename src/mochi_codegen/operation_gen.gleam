@@ -495,8 +495,38 @@ fn lookup_return_type(
 ) -> String {
   case lookup_return_sdl_type(field_name, op_type, schema_doc) {
     Some(t) -> sdl_type_to_schema_type(t)
-    None -> "schema.Named(\"TODO\")"
+    // Field is not in the schema. Use a sentinel that identifies the field
+    // so the developer can trace it; surfaced via unknown_fields/2.
+    None -> "schema.Named(\"<MISSING:" <> field_name <> ">\")"
   }
+}
+
+/// Return the list of operation root-field names that don't exist in the
+/// schema. Callers should surface these as warnings or errors — generated
+/// code that references them will compile but fail at schema resolution.
+pub fn unknown_fields(
+  ops_doc: ast.Document,
+  schema_doc: SDLDocument,
+) -> List(String) {
+  ops_doc.definitions
+  |> list.filter_map(fn(def) {
+    case def {
+      ast.OperationDefinition(op) -> Ok(op)
+      _ -> Error(Nil)
+    }
+  })
+  |> list.filter_map(fn(op) {
+    let #(op_type, sel) = case op {
+      ast.Operation(operation_type: t, selection_set: s, ..) -> #(t, s)
+      ast.ShorthandQuery(selection_set: s) -> #(ast.Query, s)
+    }
+    let field = get_root_field(sel)
+    case lookup_return_sdl_type(field, op_type, schema_doc) {
+      Some(_) -> Error(Nil)
+      None -> Ok(field)
+    }
+  })
+  |> list.unique
 }
 
 fn lookup_return_sdl_type(

@@ -1,12 +1,15 @@
 // mochi_codegen/playground.gleam
 // GraphiQL and GraphQL Playground HTML generators
 
+import gleam/string
+
 // ============================================================================
 // GraphiQL
 // ============================================================================
 
 /// Generate GraphiQL HTML page
 pub fn graphiql(endpoint: String) -> String {
+  let ep = js_string_escape(endpoint)
   "<!DOCTYPE html>
 <html lang=\"en\">
 <head>
@@ -33,7 +36,7 @@ pub fn graphiql(endpoint: String) -> String {
   <script src=\"https://unpkg.com/graphiql@3/graphiql.min.js\" crossorigin></script>
   <script>
     const fetcher = GraphiQL.createFetcher({
-      url: '" <> endpoint <> "',
+      url: '" <> ep <> "',
     });
     const root = ReactDOM.createRoot(document.getElementById('graphiql'));
     root.render(
@@ -53,6 +56,7 @@ pub fn graphiql(endpoint: String) -> String {
 
 /// Generate GraphQL Playground HTML page (legacy, but still popular)
 pub fn playground(endpoint: String) -> String {
+  let ep = js_string_escape(endpoint)
   "<!DOCTYPE html>
 <html lang=\"en\">
 <head>
@@ -100,7 +104,7 @@ pub fn playground(endpoint: String) -> String {
   <script>
     window.addEventListener('load', function () {
       GraphQLPlayground.init(document.getElementById('root'), {
-        endpoint: '" <> endpoint <> "',
+        endpoint: '" <> ep <> "',
         settings: {
           'editor.theme': 'dark',
           'editor.cursorShape': 'line',
@@ -121,6 +125,7 @@ pub fn playground(endpoint: String) -> String {
 
 /// Generate Apollo Sandbox HTML page (modern alternative)
 pub fn apollo_sandbox(endpoint: String) -> String {
+  let ep = js_string_escape(endpoint)
   "<!DOCTYPE html>
 <html lang=\"en\">
 <head>
@@ -142,7 +147,7 @@ pub fn apollo_sandbox(endpoint: String) -> String {
   <script>
     new window.EmbeddedSandbox({
       target: '#sandbox',
-      initialEndpoint: '" <> endpoint <> "',
+      initialEndpoint: '" <> ep <> "',
     });
   </script>
 </body>
@@ -155,6 +160,8 @@ pub fn apollo_sandbox(endpoint: String) -> String {
 
 /// Generate a simple GraphQL explorer with no external dependencies
 pub fn simple_explorer(endpoint: String) -> String {
+  let ep_js = js_string_escape(endpoint)
+  let ep_html = html_text_escape(endpoint)
   "<!DOCTYPE html>
 <html lang=\"en\">
 <head>
@@ -207,7 +214,7 @@ pub fn simple_explorer(endpoint: String) -> String {
   <header>
     <h1>🍡 Mochi GraphQL</h1>
     <span>|</span>
-    <span id=\"endpoint\">" <> endpoint <> "</span>
+    <span id=\"endpoint\">" <> ep_html <> "</span>
     <div style=\"flex:1\"></div>
     <button onclick=\"execute()\" id=\"runBtn\">▶ Run Query</button>
   </header>
@@ -234,7 +241,7 @@ pub fn simple_explorer(endpoint: String) -> String {
     </div>
   </main>
   <script>
-    const endpoint = '" <> endpoint <> "';
+    const endpoint = '" <> ep_js <> "';
 
     async function execute() {
       const btn = document.getElementById('runBtn');
@@ -281,4 +288,30 @@ pub fn simple_explorer(endpoint: String) -> String {
   </script>
 </body>
 </html>"
+}
+
+// ============================================================================
+// Escape helpers
+// ============================================================================
+
+/// Escape a string for safe interpolation inside a JavaScript single-quoted
+/// literal. The `</` replacement defuses `</script>` from inside a string,
+/// which would otherwise close the enclosing <script> tag.
+fn js_string_escape(s: String) -> String {
+  s
+  |> string.replace("\\", "\\\\")
+  |> string.replace("'", "\\'")
+  |> string.replace("\n", "\\n")
+  |> string.replace("\r", "\\r")
+  |> string.replace("</", "<\\/")
+}
+
+/// Escape a string for safe interpolation inside HTML text content.
+fn html_text_escape(s: String) -> String {
+  s
+  |> string.replace("&", "&amp;")
+  |> string.replace("<", "&lt;")
+  |> string.replace(">", "&gt;")
+  |> string.replace("\"", "&quot;")
+  |> string.replace("'", "&#39;")
 }

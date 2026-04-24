@@ -186,7 +186,13 @@ fn generate_enum(enum_type: EnumType, config: Config) -> String {
         Some(desc) -> "  /** " <> desc <> " */\n"
         None -> ""
       }
-      comment <> "  " <> name <> " = \"" <> name <> "\","
+      case is_js_identifier(name) {
+        True -> comment <> "  " <> name <> " = \"" <> name <> "\","
+        False ->
+          "  // Skipped: enum value \""
+          <> escape_ts_comment(name)
+          <> "\" is not a valid TypeScript identifier"
+      }
     })
     |> string.join("\n")
 
@@ -515,4 +521,31 @@ fn capitalize(str: String) -> String {
     Ok(#(first, rest)) -> string.uppercase(first) <> rest
     Error(_) -> str
   }
+}
+
+/// True when `s` is a valid ECMAScript identifier under the limited profile
+/// GraphQL enums guarantee: `[_A-Za-z][_0-9A-Za-z]*`.
+fn is_js_identifier(s: String) -> Bool {
+  case string.to_utf_codepoints(s) |> list.map(string.utf_codepoint_to_int) {
+    [] -> False
+    [first, ..rest] ->
+      is_ident_start(first) && list.all(rest, is_ident_continue)
+  }
+}
+
+fn is_ident_start(cp: Int) -> Bool {
+  cp == 95 || { cp >= 97 && cp <= 122 } || { cp >= 65 && cp <= 90 }
+}
+
+fn is_ident_continue(cp: Int) -> Bool {
+  is_ident_start(cp) || { cp >= 48 && cp <= 57 }
+}
+
+/// Sanitise a string for safe embedding in a `// ...` comment. Strips
+/// newlines (comments are single-line) and escapes double quotes.
+fn escape_ts_comment(s: String) -> String {
+  s
+  |> string.replace("\n", " ")
+  |> string.replace("\r", " ")
+  |> string.replace("\"", "\\\"")
 }

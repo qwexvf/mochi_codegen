@@ -2,6 +2,7 @@
 
 import gleam/io
 import gleam/string
+import gleeunit/should
 import mochi/schema
 import mochi/types
 import mochi_codegen/typescript
@@ -72,6 +73,29 @@ pub fn typescript_generation_test() {
     True -> Nil
     False -> panic as "TypeScript generation missing expected parts"
   }
+}
+
+pub fn enum_with_invalid_identifier_is_skipped_with_comment_test() {
+  // Schema-level hack: GraphQL spec forbids such enum values, but a user
+  // could build a schema programmatically that bypasses validation. The TS
+  // generator should refuse to emit a broken enum member and surface a
+  // comment the developer can grep for.
+  let bad_enum =
+    types.enum_type("Bad")
+    |> types.value("OK_VALUE")
+    |> types.value("weird-value")
+    |> types.build_enum
+
+  let test_schema =
+    schema.schema() |> schema.add_type(schema.EnumTypeDef(bad_enum))
+
+  let ts_code = typescript.generate(test_schema)
+
+  ts_code |> string.contains("OK_VALUE = \"OK_VALUE\",") |> should.be_true
+  ts_code |> string.contains("weird-value = \"weird-value\"") |> should.be_false
+  ts_code
+  |> string.contains("// Skipped: enum value \"weird-value\"")
+  |> should.be_true
 }
 
 // Print example output

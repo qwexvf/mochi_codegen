@@ -47,6 +47,7 @@ pub type CliError {
   ParseError(message: String)
   WriteError(path: String, reason: String)
   InvalidArgs(message: String)
+  UnknownOperationFields(path: String, fields: List(String))
 }
 
 // ── Entry points ──────────────────────────────────────────────────────────────
@@ -308,6 +309,10 @@ fn generate_from_paths(
           mochi_parser.parse(content)
           |> result.map_error(fn(e) { ParseError(format_op_parse_error(e)) }),
         )
+        use _ <- result.try(case operation_gen.unknown_fields(ops_doc, merged) {
+          [] -> Ok(Nil)
+          unknown -> Error(UnknownOperationFields(op_path, unknown))
+        })
         let generated = operation_gen.generate(ops_doc, merged)
         let filename = schema_stem(op_path) <> resolver_suffix <> ".gleam"
         let dest = out_path <> filename
@@ -1292,6 +1297,12 @@ fn format_error(err: CliError) -> String {
     ParseError(msg) -> "Parse error: " <> msg
     WriteError(path, reason) -> "Error writing '" <> path <> "': " <> reason
     InvalidArgs(msg) -> msg
+    UnknownOperationFields(path, fields) ->
+      "Unknown root field(s) in "
+      <> path
+      <> ": "
+      <> string.join(fields, ", ")
+      <> " — these operations reference fields that don't exist in the schema."
   }
 }
 
@@ -1332,7 +1343,7 @@ Usage:
   gleam run -m mochi_codegen/cli -- <command>
 
 Commands:
-  init                               Create mochi.config.json
+  init                               Create mochi.config.yaml
   generate                           Generate code from config
   <schema(s)> [opts]                 Direct mode (glob or file list)
 
@@ -1357,7 +1368,7 @@ fn init_help_text() -> String {
 Usage:
   gleam run -m mochi_codegen/cli -- init [schema_glob]
 
-Creates mochi.config.json. Optionally specify a schema glob (default: schema.graphql).
+Creates mochi.config.yaml. Optionally specify a schema glob (default: schema.graphql).
 
 Examples:
   gleam run -m mochi_codegen/cli -- init
@@ -1366,7 +1377,7 @@ Examples:
 }
 
 fn generate_help_text() -> String {
-  "mochi generate - Generate code from mochi.config.json
+  "mochi generate - Generate code from mochi.config.yaml
 
 Usage:
   gleam run -m mochi_codegen/cli -- generate [options]
