@@ -317,10 +317,8 @@ fn generate_from_paths(
           generated,
           MergeNewFunctions,
         ))
-        let msg = case written {
-          True -> "Generated operations: " <> dest
-          False -> "Generated operations (up to date): " <> dest
-        }
+        let msg =
+          format_write_message("Generated operations", dest, written, generated)
         Ok([msg, ..msgs])
       })
     }
@@ -352,15 +350,9 @@ fn write_single_or_dir(
 ) -> Result(List(String), CliError) {
   case config.is_dir_output(output_path) {
     False -> {
-      use written <- result.try(write_with_policy(
-        output_path,
-        generate(merged),
-        policy,
-      ))
-      let msg = case written {
-        True -> label <> ": " <> output_path
-        False -> label <> " (up to date): " <> output_path
-      }
+      let content = generate(merged)
+      use written <- result.try(write_with_policy(output_path, content, policy))
+      let msg = format_write_message(label, output_path, written, content)
       Ok([msg, ..messages])
     }
     True -> {
@@ -370,21 +362,42 @@ fn write_single_or_dir(
           let filename = schema_filename(src_path, suffix)
           let out_path = output_path <> filename
           use _ <- result.try(ensure_dir(output_path))
-          use written <- result.try(write_with_policy(
-            out_path,
-            generate(doc),
-            policy,
-          ))
-          let msg = case written {
-            True -> label <> ": " <> out_path
-            False -> label <> " (up to date): " <> out_path
-          }
+          let content = generate(doc)
+          use written <- result.try(write_with_policy(out_path, content, policy))
+          let msg = format_write_message(label, out_path, written, content)
           Ok([msg, ..msgs])
         }),
       )
       Ok(msgs)
     }
   }
+}
+
+/// Build a "Generated X: path" message, decorated with an unmapped-fields
+/// warning when the generated content contains "// TODO: register" markers.
+fn format_write_message(
+  label: String,
+  path: String,
+  written: Bool,
+  content: String,
+) -> String {
+  let base = case written {
+    True -> label
+    False -> label <> " (up to date)"
+  }
+  case count_unmapped_fields(content) {
+    0 -> base <> ": " <> path
+    n ->
+      base
+      <> " ("
+      <> int.to_string(n)
+      <> " unmapped fields — see TODO comments): "
+      <> path
+  }
+}
+
+fn count_unmapped_fields(content: String) -> Int {
+  string.split(content, "// TODO: register") |> list.length |> fn(n) { n - 1 }
 }
 
 /// Extract the stem from a schema path: "graphql/user.graphql" → "user"
@@ -417,15 +430,9 @@ fn write_single_or_dir_mapped(
 ) -> Result(List(String), CliError) {
   case config.is_dir_output(output_path) {
     False -> {
-      use written <- result.try(write_with_policy(
-        output_path,
-        generate_single(merged),
-        policy,
-      ))
-      let msg = case written {
-        True -> label <> ": " <> output_path
-        False -> label <> " (up to date): " <> output_path
-      }
+      let content = generate_single(merged)
+      use written <- result.try(write_with_policy(output_path, content, policy))
+      let msg = format_write_message(label, output_path, written, content)
       Ok([msg, ..messages])
     }
     True -> {
@@ -435,15 +442,9 @@ fn write_single_or_dir_mapped(
           let filename = schema_filename(src_path, suffix)
           let out_path = output_path <> filename
           use _ <- result.try(ensure_dir(output_path))
-          use written <- result.try(write_with_policy(
-            out_path,
-            make_generator(src_path)(doc),
-            policy,
-          ))
-          let msg = case written {
-            True -> label <> ": " <> out_path
-            False -> label <> " (up to date): " <> out_path
-          }
+          let content = make_generator(src_path)(doc)
+          use written <- result.try(write_with_policy(out_path, content, policy))
+          let msg = format_write_message(label, out_path, written, content)
           Ok([msg, ..msgs])
         }),
       )
@@ -901,11 +902,12 @@ fn write_with_policy(
           Ok(True)
         }
         Ok(existing) -> {
-          let additions = new_function_stubs(existing, content)
-          case additions {
-            "" -> Ok(False)
-            _ -> {
-              use _ <- result.try(write_file(path, existing <> additions))
+          let with_new_fns = existing <> new_function_stubs(existing, content)
+          let final = patch_missing_type_fields(with_new_fns, content)
+          case final == existing {
+            True -> Ok(False)
+            False -> {
+              use _ <- result.try(write_file(path, final))
               Ok(True)
             }
           }
@@ -920,7 +922,8 @@ fn new_function_stubs(existing: String, generated: String) -> String {
   blocks
   |> list.filter(fn(block) {
     let name = fn_name_from_block(block)
-    !string.contains(existing, "pub fn " <> name)
+    !string.contains(block, "types.object(")
+    && !string.contains(existing, "fn " <> name <> "(")
   })
   |> string.join("\n\n")
   |> fn(s) {
@@ -931,6 +934,122 @@ fn new_function_stubs(existing: String, generated: String) -> String {
   }
 }
 
+fn split_once(src: String, on: String) -> Result(#(String, String), Nil) {
+  case string.split(src, on) {
+    [] | [_] -> Error(Nil)
+    [first, ..rest] -> Ok(#(first, string.join(rest, on)))
+  }
+}
+
+fn extract_type_field_lines(block: String) -> List(String) {
+  string.split(block, "\n")
+  |> list.filter(fn(line) {
+    string.contains(line, "|> types.")
+    && !string.contains(line, "|> types.build(")
+    && !string.contains(line, "|> types.object(")
+  })
+}
+
+fn extract_field_name_from_line(line: String) -> String {
+  case string.split(line, "\"") {
+    [_, name, ..] -> name
+    _ -> ""
+  }
+}
+
+fn truncate_at_next_fn(src: String) -> String {
+  case split_once(src, "\nfn ") {
+    Ok(#(before, _)) ->
+      case split_once(before, "\npub fn ") {
+        Ok(#(shorter, _)) -> shorter
+        Error(_) -> before
+      }
+    Error(_) ->
+      case split_once(src, "\npub fn ") {
+        Ok(#(before, _)) -> before
+        Error(_) -> src
+      }
+  }
+}
+
+fn extract_fn_body_text(src: String, fn_name: String) -> String {
+  let extract = fn(marker) {
+    case split_once(src, marker) {
+      Error(_) -> ""
+      Ok(#(_, after)) -> truncate_at_next_fn(after)
+    }
+  }
+  let pub_result = extract("\npub fn " <> fn_name <> "(")
+  case pub_result {
+    "" -> extract("\nfn " <> fn_name <> "(")
+    found -> found
+  }
+}
+
+fn patch_fn_missing_fields(
+  existing: String,
+  fn_name: String,
+  missing_lines: List(String),
+) -> String {
+  case missing_lines {
+    [] -> existing
+    _ -> {
+      let insertion = string.join(missing_lines, "\n") <> "\n"
+      let try_patch = fn(marker) {
+        case split_once(existing, marker) {
+          Error(_) -> Error(Nil)
+          Ok(#(before, after)) ->
+            case split_once(after, "\n  |> types.build(") {
+              Error(_) -> Error(Nil)
+              Ok(#(pre_build, post_build)) ->
+                Ok(
+                  before
+                  <> marker
+                  <> pre_build
+                  <> "\n"
+                  <> insertion
+                  <> "  |> types.build("
+                  <> post_build,
+                )
+            }
+        }
+      }
+      case try_patch("\npub fn " <> fn_name <> "(") {
+        Ok(patched) -> patched
+        Error(_) ->
+          case try_patch("\nfn " <> fn_name <> "(") {
+            Ok(patched) -> patched
+            Error(_) -> existing
+          }
+      }
+    }
+  }
+}
+
+fn patch_missing_type_fields(existing: String, generated: String) -> String {
+  let gen_type_builders =
+    extract_pub_fn_blocks(generated)
+    |> list.filter(fn(block) { string.contains(block, "types.object(") })
+
+  list.fold(gen_type_builders, existing, fn(acc, gen_block) {
+    let fn_name = fn_name_from_block(gen_block)
+    case fn_name, string.contains(acc, "fn " <> fn_name <> "(") {
+      "", _ | _, False -> acc
+      _, True -> {
+        let gen_fields = extract_type_field_lines(gen_block)
+        let fn_body = extract_fn_body_text(acc, fn_name)
+        let missing =
+          list.filter(gen_fields, fn(line) {
+            let field_name = extract_field_name_from_line(line)
+            field_name != ""
+            && !string.contains(fn_body, "\"" <> field_name <> "\"")
+          })
+        patch_fn_missing_fields(acc, fn_name, missing)
+      }
+    }
+  })
+}
+
 fn extract_pub_fn_blocks(src: String) -> List(String) {
   let parts = string.split(src, "\npub fn ")
   case parts {
@@ -938,7 +1057,7 @@ fn extract_pub_fn_blocks(src: String) -> List(String) {
     [_, ..rest] ->
       list.map(rest, fn(part) { "pub fn " <> part })
       |> list.map(fn(block) {
-        case string.split(block, "\npub fn ") {
+        case string.split(block, "\nfn ") {
           [first, ..] -> string.trim_end(first)
           [] -> block
         }

@@ -19,10 +19,12 @@ pub fn generate(ops_doc: ast.Document, schema_doc: SDLDocument) -> String {
     ops -> {
       let needs_dict = list.any(ops, fn(op) { has_input_arg(op, schema_doc) })
       let needs_list = list.any(ops, has_list_return(_, schema_doc))
-      let needs_result = list.any(ops, fn(op) { count_vars(op) >= 1 })
+      let needs_result = list.any(ops, has_nonnull_var)
       let encoder_types = collect_encoder_types(ops, schema_doc)
       let needs_dynamic = needs_dict || encoder_types != []
-      let needs_none = list.any(ops, has_nullable_input_field(_, schema_doc))
+      let needs_none =
+        list.any(ops, has_nullable_input_field(_, schema_doc))
+        || list.any(ops, has_nullable_input_arg(_, schema_doc))
 
       let imports =
         [
@@ -257,18 +259,40 @@ fn generate_resolve(
           let type_name = ast_inner_type_name(v.type_)
           case is_input_type(type_name, schema_doc) {
             False -> {
-              let helper = scalar_to_helper(type_name)
-              [
-                "      use "
-                <> to_snake_case(v.variable)
-                <> " <- result.try(query."
-                <> helper
-                <> "(args, \""
-                <> v.variable
-                <> "\"))",
-              ]
+              case ast_is_nonnull(v.type_) {
+                True -> {
+                  let helper = scalar_to_helper(type_name)
+                  [
+                    "      use "
+                    <> to_snake_case(v.variable)
+                    <> " <- result.try(query."
+                    <> helper
+                    <> "(args, \""
+                    <> v.variable
+                    <> "\"))",
+                  ]
+                }
+                False -> {
+                  let helper = scalar_to_optional_helper(type_name)
+                  [
+                    "      let _"
+                    <> to_snake_case(v.variable)
+                    <> " = query."
+                    <> helper
+                    <> "(args, \""
+                    <> v.variable
+                    <> "\")",
+                  ]
+                }
+              }
             }
-            True -> generate_input_use_lines(v.variable, type_name, schema_doc)
+            True ->
+              generate_input_use_lines(
+                v.variable,
+                type_name,
+                schema_doc,
+                ast_is_nonnull(v.type_),
+              )
           }
         })
       "fn(args, _ctx) {\n"
@@ -284,34 +308,10 @@ fn generate_input_use_lines(
   arg_name: String,
   type_name: String,
   schema_doc: SDLDocument,
+  is_nonnull: Bool,
 ) -> List(String) {
   let dyn_var = to_snake_case(arg_name) <> "_dyn"
   let fields = find_input_fields(type_name, schema_doc)
-  let field_lines =
-    list.map(fields, fn(f) {
-      let is_nonnull = sdl_is_nonnull(f.field_type)
-      let inner = sdl_inner_type_name(f.field_type)
-      let dec = scalar_to_decode_fn(inner)
-      case is_nonnull {
-        True ->
-          "        use "
-          <> to_snake_case(f.name)
-          <> " <- decode.field(\""
-          <> f.name
-          <> "\", "
-          <> dec
-          <> ")"
-        False ->
-          "        use "
-          <> to_snake_case(f.name)
-          <> " <- decode.optional_field(\""
-          <> f.name
-          <> "\", None, types.nullable("
-          <> dec
-          <> "))"
-      }
-    })
-    |> string.join("\n")
   let names =
     list.map(fields, fn(f) { to_snake_case(f.name) }) |> string.join(", ")
   let tuple = case fields {
@@ -328,22 +328,85 @@ fn generate_input_use_lines(
       )
       <> ")"
   }
-  [
-    "      use " <> dyn_var <> " <- result.try(",
-    "        dict.get(args, \"" <> arg_name <> "\")",
-    "        |> result.map_error(fn(_) { error.new(\"Missing input argument\") }),",
-    "      )",
-    "      let decoder = {",
-    field_lines,
-    "        decode.success(" <> tuple <> ")",
-    "      }",
-    "      use " <> pat <> " <- result.try(",
-    "        decode.run(" <> dyn_var <> ", decoder)",
-    "        |> result.map_error(fn(_) { error.new(\"Invalid "
-      <> type_name
-      <> "\") }),",
-    "      )",
-  ]
+  case is_nonnull {
+    True -> {
+      let field_lines = build_decoder_field_lines(fields, "        ")
+      [
+        "      use " <> dyn_var <> " <- result.try(",
+        "        dict.get(args, \"" <> arg_name <> "\")",
+        "        |> result.map_error(fn(_) { error.new(\"Missing input argument\") }),",
+        "      )",
+        "      let decoder = {",
+        field_lines,
+        "        decode.success(" <> tuple <> ")",
+        "      }",
+        "      use " <> pat <> " <- result.try(",
+        "        decode.run(" <> dyn_var <> ", decoder)",
+        "        |> result.map_error(fn(_) { error.new(\"Invalid "
+          <> type_name
+          <> "\") }),",
+        "      )",
+      ]
+    }
+    False -> {
+      let field_lines = build_decoder_field_lines(fields, "            ")
+      [
+        "      let _"
+          <> to_snake_case(arg_name)
+          <> " = case dict.get(args, \""
+          <> arg_name
+          <> "\") {",
+        "        Error(_) -> option.None",
+        "        Ok(" <> dyn_var <> ") -> {",
+        "          let decoder = {",
+        field_lines,
+        "            decode.success(" <> tuple <> ")",
+        "          }",
+        "          case decode.run(" <> dyn_var <> ", decoder) {",
+        "            Ok(val) -> option.Some(val)",
+        "            Error(_) -> option.None",
+        "          }",
+        "        }",
+        "      }",
+      ]
+    }
+  }
+}
+
+fn build_decoder_field_lines(
+  fields: List(sdl_ast.InputFieldDef),
+  indent: String,
+) -> String {
+  list.map(fields, fn(f) {
+    let field_is_nonnull = sdl_is_nonnull(f.field_type)
+    let inner = sdl_inner_type_name(f.field_type)
+    let inner_dec = scalar_to_decode_fn(inner)
+    let dec = case sdl_is_list(f.field_type) {
+      True -> "decode.list(" <> inner_dec <> ")"
+      False -> inner_dec
+    }
+    case field_is_nonnull {
+      True ->
+        indent
+        <> "use "
+        <> to_snake_case(f.name)
+        <> " <- decode.field(\""
+        <> f.name
+        <> "\", "
+        <> dec
+        <> ")"
+      False ->
+        indent
+        <> "use "
+        <> to_snake_case(f.name)
+        <> " <- decode.optional_field(\""
+        <> f.name
+        <> "\", None, types.nullable("
+        <> dec
+        <> "))"
+    }
+  })
+  |> string.join("\n")
 }
 
 // ── Encoders ──────────────────────────────────────────────────────────────────
@@ -545,6 +608,13 @@ fn sdl_is_nonnull(t: sdl_ast.SDLType) -> Bool {
   }
 }
 
+fn ast_is_nonnull(t: ast.Type) -> Bool {
+  case t {
+    ast.NonNullType(_) -> True
+    _ -> False
+  }
+}
+
 fn scalar_to_helper(type_name: String) -> String {
   case type_name {
     "ID" -> "get_id"
@@ -553,6 +623,17 @@ fn scalar_to_helper(type_name: String) -> String {
     "Float" -> "get_float"
     "Boolean" -> "get_bool"
     _ -> "get_string"
+  }
+}
+
+fn scalar_to_optional_helper(type_name: String) -> String {
+  case type_name {
+    "ID" -> "get_optional_id"
+    "String" -> "get_optional_string"
+    "Int" -> "get_optional_int"
+    "Float" -> "get_optional_float"
+    "Boolean" -> "get_optional_bool"
+    _ -> "get_optional_string"
   }
 }
 
@@ -629,11 +710,23 @@ fn has_list_return(op: ast.Operation, schema_doc: SDLDocument) -> Bool {
   }
 }
 
-fn count_vars(op: ast.Operation) -> Int {
-  case op {
-    ast.Operation(variable_definitions: v, ..) -> list.length(v)
-    ast.ShorthandQuery(_) -> 0
+fn has_nonnull_var(op: ast.Operation) -> Bool {
+  let vars = case op {
+    ast.Operation(variable_definitions: v, ..) -> v
+    ast.ShorthandQuery(_) -> []
   }
+  list.any(vars, fn(v) { ast_is_nonnull(v.type_) })
+}
+
+fn has_nullable_input_arg(op: ast.Operation, schema_doc: SDLDocument) -> Bool {
+  let vars = case op {
+    ast.Operation(variable_definitions: v, ..) -> v
+    ast.ShorthandQuery(_) -> []
+  }
+  list.any(vars, fn(v) {
+    !ast_is_nonnull(v.type_)
+    && is_input_type(ast_inner_type_name(v.type_), schema_doc)
+  })
 }
 
 fn has_nullable_input_field(op: ast.Operation, schema_doc: SDLDocument) -> Bool {

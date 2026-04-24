@@ -86,3 +86,68 @@ input PostInput { title: String! body: String! }",
   out |> contains("decode.run") |> should.be_true
   out |> contains("get_string(args, \"input\")") |> should.be_false
 }
+
+pub fn list_return_generates_list_encoder_test() {
+  let ops =
+    parse_ops(
+      "query ListUsers($limit: Int, $offset: Int) { users(limit: $limit, offset: $offset) { id } }",
+    )
+  let schema =
+    parse_schema(
+      "type Query { users(limit: Int, offset: Int): [User!]! }
+type User { id: ID! }",
+    )
+  let out = operation_gen.generate(ops, schema)
+  out |> contains("import gleam/list") |> should.be_true
+  out |> contains("list.map(items, user_to_dynamic)") |> should.be_true
+  out |> contains("query.get_optional_int(args, \"limit\")") |> should.be_true
+  out |> contains("query.get_optional_int(args, \"offset\")") |> should.be_true
+}
+
+pub fn combined_ops_generate_register_function_test() {
+  let ops =
+    parse_ops(
+      "query GetUser($id: ID!) { user(id: $id) { id } }
+mutation CreateUser($input: CreateUserInput!) { createUser(input: $input) { id } }",
+    )
+  let schema =
+    parse_schema(
+      "type Query { user(id: ID!): User }
+type Mutation { createUser(input: CreateUserInput!): User }
+type User { id: ID! }
+input CreateUserInput { name: String! email: String! }",
+    )
+  let out = operation_gen.generate(ops, schema)
+  out |> contains("pub fn register") |> should.be_true
+  out |> contains("add_query(user_query") |> should.be_true
+  out |> contains("add_mutation(create_user_mutation") |> should.be_true
+}
+
+pub fn create_user_decodes_all_input_fields_test() {
+  let ops =
+    parse_ops(
+      "mutation CreateUser($input: CreateUserInput!) { createUser(input: $input) { id } }",
+    )
+  let schema =
+    parse_schema(
+      "type Mutation { createUser(input: CreateUserInput!): User }
+type User { id: ID! }
+input CreateUserInput { name: String! email: String! }",
+    )
+  let out = operation_gen.generate(ops, schema)
+  out |> contains("decode.field(\"name\"") |> should.be_true
+  out |> contains("decode.string") |> should.be_true
+  out |> contains("decode.field(\"email\"") |> should.be_true
+}
+
+pub fn boolean_return_uses_scalar_encoder_test() {
+  let ops = parse_ops("mutation DeleteUser($id: ID!) { deleteUser(id: $id) }")
+  let schema =
+    parse_schema(
+      "type Mutation { deleteUser(id: ID!): Boolean! }
+type User { id: ID! }",
+    )
+  let out = operation_gen.generate(ops, schema)
+  out |> contains("fn(v) { types.to_dynamic(v) }") |> should.be_true
+  out |> contains("delete_user_to_dynamic") |> should.be_false
+}

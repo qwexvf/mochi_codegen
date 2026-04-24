@@ -1,0 +1,107 @@
+scalar DateTime
+scalar URL
+
+enum UserRole {
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum PostStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum SortOrder {
+  ASC
+  DESC
+}
+
+type User {
+  id: ID!
+  name: String!
+  email: String!
+  role: UserRole!
+  avatar: URL
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type Post {
+  id: ID!
+  title: String!
+  body: String!
+  status: PostStatus!
+  authorId: ID!
+  publishedAt: DateTime
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  tagIds: [ID!]!
+}
+
+type Tag {
+  id: ID!
+  name: String!
+  slug: String!
+}
+
+type PostConnection {
+  nodes: [Post!]!
+  totalCount: Int!
+  hasMore: Boolean!
+}
+
+input CreateUserInput {
+  name: String!
+  email: String!
+  role: UserRole!
+  avatarUrl: URL
+}
+
+input UpdateUserInput {
+  name: String
+  email: String
+  role: UserRole
+}
+
+input CreatePostInput {
+  title: String!
+  body: String!
+  authorId: ID!
+  tagIds: [ID!]
+}
+
+input UpdatePostInput {
+  title: String
+  body: String
+  tagIds: [ID!]
+}
+
+input PostsFilterInput {
+  status: PostStatus
+  authorId: ID
+  titleContains: String
+  sortOrder: SortOrder
+}
+
+type Query {
+  user(id: ID!): User
+  users(limit: Int, offset: Int, role: UserRole): [User!]!
+  post(id: ID!): Post
+  posts(filter: PostsFilterInput, limit: Int, offset: Int): PostConnection!
+  tags: [Tag!]!
+  tagBySlug(slug: String!): Tag
+}
+
+type Mutation {
+  createUser(input: CreateUserInput!): User!
+  updateUser(id: ID!, input: UpdateUserInput!): User!
+  deleteUser(id: ID!): Boolean!
+  createPost(input: CreatePostInput!): Post!
+  updatePost(id: ID!, input: UpdatePostInput!): Post!
+  publishPost(id: ID!): Post!
+  deletePost(id: ID!): Boolean!
+  addTagToPost(postId: ID!, tagId: ID!): Post!
+  removeTagFromPost(postId: ID!, tagId: ID!): Post!
+}

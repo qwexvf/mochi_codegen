@@ -288,9 +288,175 @@ fn generate_resolvers_impl(
     False -> ""
   }
 
-  let imports = option_import <> extra_imports <> type_imports <> "\n"
+  let type_builders = generate_type_builders(doc)
+  let mochi_imports = case type_builders {
+    "" -> ""
+    _ -> "import mochi/schema\nimport mochi/types\n"
+  }
 
-  header <> imports
+  let imports =
+    option_import <> extra_imports <> mochi_imports <> type_imports <> "\n"
+
+  let stubs = case type_builders {
+    "" -> ""
+    s -> s <> "\n"
+  }
+
+  header <> imports <> stubs
+}
+
+pub fn generate_type_builders(doc: SDLDocument) -> String {
+  doc.definitions
+  |> list.filter_map(fn(def) {
+    case def {
+      sdl_ast.TypeDefinition(sdl_ast.ObjectTypeDefinition(obj)) ->
+        case obj.name {
+          "Query" | "Mutation" | "Subscription" -> Error(Nil)
+          _ -> Ok(generate_object_type_builder(obj))
+        }
+      _ -> Error(Nil)
+    }
+  })
+  |> string.join("\n\n")
+}
+
+fn generate_object_type_builder(obj: ObjectTypeDef) -> String {
+  let fn_name = to_snake_case(obj.name) <> "_type"
+  let type_name = obj.name
+  let var_name = to_snake_case(obj.name)
+  let decode_fn = "decode_" <> var_name
+
+  let field_lines =
+    obj.fields
+    |> list.map(fn(f) { generate_type_field_line(f, type_name, var_name) })
+    |> string.join("\n")
+
+  "pub fn "
+  <> fn_name
+  <> "() {\n"
+  <> "  types.object(\""
+  <> type_name
+  <> "\")\n"
+  <> field_lines
+  <> "\n  |> types.build("
+  <> decode_fn
+  <> ")\n}"
+}
+
+fn generate_type_field_line(
+  field: FieldDef,
+  type_name: String,
+  var_name: String,
+) -> String {
+  let gql_name = field.name
+  let accessor_field = to_snake_case(field.name)
+  let simple_accessor =
+    "fn("
+    <> var_name
+    <> ": "
+    <> type_name
+    <> ") { "
+    <> var_name
+    <> "."
+    <> accessor_field
+    <> " }"
+
+  case field.field_type {
+    sdl_ast.NonNullType(sdl_ast.NamedType("String")) ->
+      "  |> types.non_null_string(\""
+      <> gql_name
+      <> "\", "
+      <> simple_accessor
+      <> ")"
+    sdl_ast.NonNullType(sdl_ast.NamedType("Int")) ->
+      "  |> types.non_null_int(\""
+      <> gql_name
+      <> "\", "
+      <> simple_accessor
+      <> ")"
+    sdl_ast.NonNullType(sdl_ast.NamedType("Float")) ->
+      "  |> types.non_null_float(\""
+      <> gql_name
+      <> "\", "
+      <> simple_accessor
+      <> ")"
+    sdl_ast.NonNullType(sdl_ast.NamedType("Boolean")) ->
+      "  |> types.non_null_bool(\""
+      <> gql_name
+      <> "\", "
+      <> simple_accessor
+      <> ")"
+    sdl_ast.NonNullType(sdl_ast.NamedType("ID")) ->
+      "  |> types.id(\"" <> gql_name <> "\", " <> simple_accessor <> ")"
+    sdl_ast.NonNullType(sdl_ast.ListType(inner)) -> {
+      let inner_name = sdl_inner_type_name(inner)
+      "  |> types.list_object(\""
+      <> gql_name
+      <> "\", \""
+      <> inner_name
+      <> "\", fn("
+      <> var_name
+      <> ": "
+      <> type_name
+      <> ") { todo })"
+    }
+    sdl_ast.NonNullType(sdl_ast.NamedType(other)) ->
+      "  // TODO: register non-null field \""
+      <> gql_name
+      <> "\" of type "
+      <> other
+    sdl_ast.NamedType("String") ->
+      "  |> types.optional_string(\""
+      <> gql_name
+      <> "\", "
+      <> simple_accessor
+      <> ")"
+    sdl_ast.NamedType("Int") ->
+      "  |> types.optional_int(\""
+      <> gql_name
+      <> "\", "
+      <> simple_accessor
+      <> ")"
+    sdl_ast.NamedType("Float") ->
+      "  |> types.optional_float(\""
+      <> gql_name
+      <> "\", "
+      <> simple_accessor
+      <> ")"
+    sdl_ast.NamedType("Boolean") ->
+      "  |> types.optional_bool(\""
+      <> gql_name
+      <> "\", "
+      <> simple_accessor
+      <> ")"
+    sdl_ast.NamedType("ID") ->
+      "  |> types.optional_id(\""
+      <> gql_name
+      <> "\", "
+      <> simple_accessor
+      <> ")"
+    _ ->
+      "  // TODO: register field \""
+      <> gql_name
+      <> "\" of type "
+      <> sdl_type_to_str(field.field_type)
+  }
+}
+
+fn sdl_inner_type_name(t: SDLType) -> String {
+  case t {
+    sdl_ast.NamedType(name) -> name
+    sdl_ast.NonNullType(inner) -> sdl_inner_type_name(inner)
+    sdl_ast.ListType(inner) -> sdl_inner_type_name(inner)
+  }
+}
+
+fn sdl_type_to_str(t: SDLType) -> String {
+  case t {
+    sdl_ast.NamedType(name) -> name
+    sdl_ast.NonNullType(inner) -> sdl_type_to_str(inner) <> "!"
+    sdl_ast.ListType(inner) -> "[" <> sdl_type_to_str(inner) <> "]"
+  }
 }
 
 fn resolver_needs_option(doc: SDLDocument) -> Bool {

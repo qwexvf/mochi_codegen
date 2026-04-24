@@ -1,0 +1,73 @@
+mutation CreateUser($input: CreateUserInput!) {
+  createUser(input: $input) {
+    id
+    name
+    email
+    role
+    createdAt
+  }
+}
+
+mutation UpdateUser($id: ID!, $input: UpdateUserInput!) {
+  updateUser(id: $id, input: $input) {
+    id
+    name
+    email
+    role
+    updatedAt
+  }
+}
+
+mutation DeleteUser($id: ID!) {
+  deleteUser(id: $id)
+}
+
+mutation CreatePost($input: CreatePostInput!) {
+  createPost(input: $input) {
+    id
+    title
+    body
+    status
+    authorId
+    createdAt
+  }
+}
+
+mutation UpdatePost($id: ID!, $input: UpdatePostInput!) {
+  updatePost(id: $id, input: $input) {
+    id
+    title
+    body
+    status
+    updatedAt
+  }
+}
+
+mutation PublishPost($id: ID!) {
+  publishPost(id: $id) {
+    id
+    title
+    status
+    publishedAt
+  }
+}
+
+mutation DeletePost($id: ID!) {
+  deletePost(id: $id)
+}
+
+mutation AddTagToPost($postId: ID!, $tagId: ID!) {
+  addTagToPost(postId: $postId, tagId: $tagId) {
+    id
+    title
+    tagIds
+  }
+}
+
+mutation RemoveTagFromPost($postId: ID!, $tagId: ID!) {
+  removeTagFromPost(postId: $postId, tagId: $tagId) {
+    id
+    title
+    tagIds
+  }
+}
