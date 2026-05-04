@@ -1,16 +1,12 @@
-> **Active development** — breaking changes may be pushed to `main` at any time.
-
-
 # mochi_codegen
 
-Code generation (TypeScript types, GraphQL SDL, Gleam types + resolver stubs) and CLI for mochi GraphQL.
+Code generation (TypeScript types, GraphQL SDL, Gleam types + resolver stubs)
+and CLI for [mochi](https://github.com/qwexvf/mochi) GraphQL.
 
 ## Installation
 
-```toml
-# gleam.toml
-[dependencies]
-mochi_codegen = { git = "https://github.com/qwexvf/mochi_codegen", ref = "main" }
+```sh
+gleam add mochi_codegen
 ```
 
 ## CLI
@@ -75,5 +71,3 @@ let html = mochi_codegen.graphiql("/graphql")
 
 Apache-2.0
 
----
-Built with the help of [Claude Code](https://claude.ai/code).
