@@ -1,10 +1,10 @@
 import gleam/list
 import gleam/string
-import mochi/sdl_ast
+import mochi/internal/sdl_ast
 import mochi_codegen/cli
 import simplifile
 
-fn merge(sdl_list: List(String)) -> sdl_ast.SDLDocument {
+fn merge(sdl_list: List(String)) -> sdl_ast.SdlDocument {
   let paths =
     list.index_map(sdl_list, fn(content, i) {
       let path = "/tmp/mochi_extend_test_" <> string.inspect(i) <> ".graphql"
@@ -17,7 +17,7 @@ fn merge(sdl_list: List(String)) -> sdl_ast.SDLDocument {
   }
 }
 
-fn find_type(doc: sdl_ast.SDLDocument, name: String) -> sdl_ast.TypeDef {
+fn find_type(doc: sdl_ast.SdlDocument, name: String) -> sdl_ast.TypeDef {
   case
     list.find(doc.definitions, fn(def) {
       case def {

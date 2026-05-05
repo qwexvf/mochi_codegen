@@ -2,14 +2,14 @@
 import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should
-import mochi/sdl_ast
+import mochi/internal/sdl_ast
 import mochi_codegen/gleam as codegen
 
 // ============================================================================
 // Test Helpers
 // ============================================================================
 
-fn make_field(name: String, field_type: sdl_ast.SDLType) -> sdl_ast.FieldDef {
+fn make_field(name: String, field_type: sdl_ast.SdlType) -> sdl_ast.FieldDef {
   sdl_ast.FieldDef(
     name: name,
     description: None,
@@ -34,8 +34,8 @@ fn make_object(
 
 fn make_document(
   definitions: List(sdl_ast.TypeSystemDefinition),
-) -> sdl_ast.SDLDocument {
-  sdl_ast.SDLDocument(definitions: definitions)
+) -> sdl_ast.SdlDocument {
+  sdl_ast.SdlDocument(definitions: definitions)
 }
 
 fn contains(haystack: String, needle: String) -> Bool {

@@ -1,11 +1,12 @@
+import gleam/bit_array
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
-import mochi/ast
-import mochi/sdl_ast.{type SDLDocument}
+import mochi/internal/ast
+import mochi/internal/sdl_ast.{type SdlDocument}
 
-pub fn generate(ops_doc: ast.Document, schema_doc: SDLDocument) -> String {
+pub fn generate(ops_doc: ast.Document, schema_doc: SdlDocument) -> String {
   let operations =
     list.filter_map(ops_doc.definitions, fn(def) {
       case def {
@@ -120,7 +121,7 @@ pub fn generate(ops_doc: ast.Document, schema_doc: SDLDocument) -> String {
   }
 }
 
-fn generate_op(op: ast.Operation, schema_doc: SDLDocument) -> String {
+fn generate_op(op: ast.Operation, schema_doc: SdlDocument) -> String {
   let #(op_type, vars, sel) = case op {
     ast.Operation(
       operation_type: t,
@@ -241,7 +242,7 @@ fn generate_args(vars: List(ast.VariableDefinition)) -> String {
 fn generate_resolve(
   vars: List(ast.VariableDefinition),
   field_name: String,
-  schema_doc: SDLDocument,
+  schema_doc: SdlDocument,
 ) -> String {
   let todo_lines =
     "      // TODO: implement "
@@ -307,7 +308,7 @@ fn generate_resolve(
 fn generate_input_use_lines(
   arg_name: String,
   type_name: String,
-  schema_doc: SDLDocument,
+  schema_doc: SdlDocument,
   is_nonnull: Bool,
 ) -> List(String) {
   let dyn_var = to_snake_case(arg_name) <> "_dyn"
@@ -332,10 +333,11 @@ fn generate_input_use_lines(
     True -> {
       let field_lines = build_decoder_field_lines(fields, "        ")
       [
-        "      use " <> dyn_var <> " <- result.try(",
-        "        dict.get(args, \"" <> arg_name <> "\")",
-        "        |> result.map_error(fn(_) { error.new(\"Missing input argument\") }),",
-        "      )",
+        "      use "
+          <> dyn_var
+          <> " <- result.try(query.get_dynamic(args, \""
+          <> arg_name
+          <> "\"))",
         "      let decoder = {",
         field_lines,
         "        decode.success(" <> tuple <> ")",
@@ -353,11 +355,11 @@ fn generate_input_use_lines(
       [
         "      let _"
           <> to_snake_case(arg_name)
-          <> " = case dict.get(args, \""
+          <> " = case query.get_optional_dynamic(args, \""
           <> arg_name
           <> "\") {",
-        "        Error(_) -> option.None",
-        "        Ok(" <> dyn_var <> ") -> {",
+        "        option.None -> option.None",
+        "        option.Some(" <> dyn_var <> ") -> {",
         "          let decoder = {",
         field_lines,
         "            decode.success(" <> tuple <> ")",
@@ -413,7 +415,7 @@ fn build_decoder_field_lines(
 
 fn collect_encoder_types(
   ops: List(ast.Operation),
-  schema_doc: SDLDocument,
+  schema_doc: SdlDocument,
 ) -> List(String) {
   list.filter_map(ops, fn(op) {
     let #(op_type, sel) = case op {
@@ -491,7 +493,7 @@ fn generate_register(ops: List(ast.Operation)) -> String {
 fn lookup_return_type(
   field_name: String,
   op_type: ast.OperationType,
-  schema_doc: SDLDocument,
+  schema_doc: SdlDocument,
 ) -> String {
   case lookup_return_sdl_type(field_name, op_type, schema_doc) {
     Some(t) -> sdl_type_to_schema_type(t)
@@ -506,7 +508,7 @@ fn lookup_return_type(
 /// code that references them will compile but fail at schema resolution.
 pub fn unknown_fields(
   ops_doc: ast.Document,
-  schema_doc: SDLDocument,
+  schema_doc: SdlDocument,
 ) -> List(String) {
   ops_doc.definitions
   |> list.filter_map(fn(def) {
@@ -532,8 +534,8 @@ pub fn unknown_fields(
 fn lookup_return_sdl_type(
   field_name: String,
   op_type: ast.OperationType,
-  schema_doc: SDLDocument,
-) -> option.Option(sdl_ast.SDLType) {
+  schema_doc: SdlDocument,
+) -> option.Option(sdl_ast.SdlType) {
   let root_name = case op_type {
     ast.Query -> "Query"
     ast.Mutation -> "Mutation"
@@ -561,7 +563,7 @@ fn lookup_return_sdl_type(
 
 fn find_input_fields(
   type_name: String,
-  schema_doc: SDLDocument,
+  schema_doc: SdlDocument,
 ) -> List(sdl_ast.InputFieldDef) {
   schema_doc.definitions
   |> list.find_map(fn(def) {
@@ -575,7 +577,7 @@ fn find_input_fields(
   |> result.unwrap([])
 }
 
-fn is_input_type(name: String, schema_doc: SDLDocument) -> Bool {
+fn is_input_type(name: String, schema_doc: SdlDocument) -> Bool {
   list.any(schema_doc.definitions, fn(def) {
     case def {
       sdl_ast.TypeDefinition(sdl_ast.InputObjectTypeDefinition(i)) ->
@@ -597,7 +599,7 @@ fn ast_type_to_schema_type(t: ast.Type) -> String {
   }
 }
 
-fn sdl_type_to_schema_type(t: sdl_ast.SDLType) -> String {
+fn sdl_type_to_schema_type(t: sdl_ast.SdlType) -> String {
   case t {
     sdl_ast.NamedType(name) -> "schema.Named(\"" <> name <> "\")"
     sdl_ast.NonNullType(inner) ->
@@ -615,7 +617,7 @@ fn ast_inner_type_name(t: ast.Type) -> String {
   }
 }
 
-fn sdl_inner_type_name(t: sdl_ast.SDLType) -> String {
+fn sdl_inner_type_name(t: sdl_ast.SdlType) -> String {
   case t {
     sdl_ast.NamedType(name) -> name
     sdl_ast.NonNullType(inner) -> sdl_inner_type_name(inner)
@@ -623,7 +625,7 @@ fn sdl_inner_type_name(t: sdl_ast.SDLType) -> String {
   }
 }
 
-fn sdl_is_list(t: sdl_ast.SDLType) -> Bool {
+fn sdl_is_list(t: sdl_ast.SdlType) -> Bool {
   case t {
     sdl_ast.ListType(_) -> True
     sdl_ast.NonNullType(inner) -> sdl_is_list(inner)
@@ -631,7 +633,7 @@ fn sdl_is_list(t: sdl_ast.SDLType) -> Bool {
   }
 }
 
-fn sdl_is_nonnull(t: sdl_ast.SDLType) -> Bool {
+fn sdl_is_nonnull(t: sdl_ast.SdlType) -> Bool {
   case t {
     sdl_ast.NonNullType(_) -> True
     _ -> False
@@ -718,7 +720,7 @@ fn partition_ops(
   })
 }
 
-fn has_input_arg(op: ast.Operation, schema_doc: SDLDocument) -> Bool {
+fn has_input_arg(op: ast.Operation, schema_doc: SdlDocument) -> Bool {
   let vars = case op {
     ast.Operation(variable_definitions: v, ..) -> v
     ast.ShorthandQuery(_) -> []
@@ -728,7 +730,7 @@ fn has_input_arg(op: ast.Operation, schema_doc: SDLDocument) -> Bool {
   })
 }
 
-fn has_list_return(op: ast.Operation, schema_doc: SDLDocument) -> Bool {
+fn has_list_return(op: ast.Operation, schema_doc: SdlDocument) -> Bool {
   let #(op_type, sel) = case op {
     ast.Operation(operation_type: t, selection_set: s, ..) -> #(t, s)
     ast.ShorthandQuery(s) -> #(ast.Query, s)
@@ -748,7 +750,7 @@ fn has_nonnull_var(op: ast.Operation) -> Bool {
   list.any(vars, fn(v) { ast_is_nonnull(v.type_) })
 }
 
-fn has_nullable_input_arg(op: ast.Operation, schema_doc: SDLDocument) -> Bool {
+fn has_nullable_input_arg(op: ast.Operation, schema_doc: SdlDocument) -> Bool {
   let vars = case op {
     ast.Operation(variable_definitions: v, ..) -> v
     ast.ShorthandQuery(_) -> []
@@ -759,7 +761,7 @@ fn has_nullable_input_arg(op: ast.Operation, schema_doc: SDLDocument) -> Bool {
   })
 }
 
-fn has_nullable_input_field(op: ast.Operation, schema_doc: SDLDocument) -> Bool {
+fn has_nullable_input_field(op: ast.Operation, schema_doc: SdlDocument) -> Bool {
   let vars = case op {
     ast.Operation(variable_definitions: v, ..) -> v
     ast.ShorthandQuery(_) -> []
@@ -782,24 +784,27 @@ const gleam_keywords = [
   "pub", "test", "todo", "type", "use",
 ]
 
+// GraphQL identifiers are ASCII-only; case conversion is byte-level.
 fn to_snake_case(input: String) -> String {
-  let snake =
-    input
-    |> string.to_graphemes
-    |> list.index_map(fn(char, idx) {
-      case is_uppercase(char), idx {
-        True, 0 -> string.lowercase(char)
-        True, _ -> "_" <> string.lowercase(char)
-        False, _ -> char
-      }
-    })
-    |> string.join("")
+  let assert Ok(snake) =
+    bit_array.to_string(snake_loop(bit_array.from_string(input), 0, <<>>))
   case list.contains(gleam_keywords, snake) {
     True -> snake <> "_"
     False -> snake
   }
 }
 
-fn is_uppercase(char: String) -> Bool {
-  char == string.uppercase(char) && char != string.lowercase(char)
+fn snake_loop(bytes: BitArray, idx: Int, acc: BitArray) -> BitArray {
+  case bytes {
+    <<>> -> acc
+    <<b, rest:bits>> if b >= 65 && b <= 90 -> {
+      let lower = b + 32
+      case idx {
+        0 -> snake_loop(rest, idx + 1, <<acc:bits, lower>>)
+        _ -> snake_loop(rest, idx + 1, <<acc:bits, "_":utf8, lower>>)
+      }
+    }
+    <<b, rest:bits>> -> snake_loop(rest, idx + 1, <<acc:bits, b>>)
+    _ -> acc
+  }
 }

@@ -5,6 +5,7 @@
 //   let ts_code = typescript.generate(schema)
 //   // Write to file: types.generated.ts
 
+import gleam/bit_array
 import gleam/dict
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -516,10 +517,16 @@ fn get_input_types(schema: Schema) -> List(InputObjectType) {
 // String Helpers
 // ============================================================================
 
+/// Uppercase the first ASCII byte. GraphQL type names are ASCII so we
+/// flip a single bit instead of running the Unicode case-folding tables.
 fn capitalize(str: String) -> String {
-  case string.pop_grapheme(str) {
-    Ok(#(first, rest)) -> string.uppercase(first) <> rest
-    Error(_) -> str
+  case bit_array.from_string(str) {
+    <<b, rest:bits>> if b >= 97 && b <= 122 -> {
+      let assert Ok(rest_str) = bit_array.to_string(rest)
+      let assert Ok(upper) = bit_array.to_string(<<{ b - 32 }>>)
+      upper <> rest_str
+    }
+    _ -> str
   }
 }
 

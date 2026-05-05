@@ -31,6 +31,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/string
 import simplifile
 import taffy
+import taffy/value as taffy_value
 
 /// Default config file name
 pub const config_file = "mochi.config.yaml"
@@ -248,7 +249,7 @@ fn decode_schema(doc: taffy.Value) -> Result(List(String), String) {
 fn decode_output(doc: taffy.Value) -> Result(OutputConfig, String) {
   let output = case taffy.get(doc, "output") {
     Ok(v) -> v
-    Error(_) -> taffy.mapping([])
+    Error(_) -> taffy_value.Mapping([])
   }
   Ok(OutputConfig(
     typescript: opt_string(output, "typescript"),
@@ -262,7 +263,7 @@ fn decode_output(doc: taffy.Value) -> Result(OutputConfig, String) {
 fn decode_gleam(doc: taffy.Value) -> Result(GleamConfig, String) {
   let g = case taffy.get(doc, "gleam") {
     Ok(v) -> v
-    Error(_) -> taffy.mapping([])
+    Error(_) -> taffy_value.Mapping([])
   }
   Ok(GleamConfig(
     types_module_prefix: req_string(g, "types_module_prefix", "generated"),

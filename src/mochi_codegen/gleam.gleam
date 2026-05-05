@@ -1,10 +1,11 @@
+import gleam/bit_array
 import gleam/list
 import gleam/option.{Some}
 import gleam/string
-import mochi/sdl_ast.{
+import mochi/internal/sdl_ast.{
   type EnumTypeDef, type EnumValueDef, type FieldDef, type InputFieldDef,
   type InputObjectTypeDef, type InterfaceTypeDef, type ObjectTypeDef,
-  type SDLDocument, type SDLType, type ScalarTypeDef, type TypeDef,
+  type ScalarTypeDef, type SdlDocument, type SdlType, type TypeDef,
   type UnionTypeDef,
 }
 
@@ -32,7 +33,7 @@ pub fn default_config() -> GleamGenConfig {
 }
 
 /// Generate Gleam types from SDL document (single-file mode — no cross-imports).
-pub fn generate_types(doc: SDLDocument, config: GleamGenConfig) -> String {
+pub fn generate_types(doc: SdlDocument, config: GleamGenConfig) -> String {
   generate_types_with_registry(doc, config, [])
 }
 
@@ -42,7 +43,7 @@ pub fn generate_types(doc: SDLDocument, config: GleamGenConfig) -> String {
 /// `registry` is a list of `#(type_name, full_module_path)` pairs covering all
 /// types defined in sibling generated files.
 pub fn generate_types_with_registry(
-  doc: SDLDocument,
+  doc: SdlDocument,
   config: GleamGenConfig,
   registry: List(#(String, String)),
 ) -> String {
@@ -111,7 +112,7 @@ pub fn generate_types_with_registry(
 
 /// Returns the list of type names defined in a document.
 /// Used by the CLI to build cross-file import registries.
-pub fn collect_defined_names(doc: SDLDocument) -> List(String) {
+pub fn collect_defined_names(doc: SdlDocument) -> List(String) {
   list.filter_map(doc.definitions, fn(def) {
     case def {
       sdl_ast.TypeDefinition(td) -> Ok(type_def_name(td))
@@ -132,7 +133,7 @@ fn type_def_name(td: TypeDef) -> String {
 }
 
 fn collect_external_types(
-  doc: SDLDocument,
+  doc: SdlDocument,
   defined: List(String),
 ) -> List(String) {
   doc.definitions
@@ -163,7 +164,7 @@ fn collect_types_in_def(td: TypeDef) -> List(String) {
   }
 }
 
-fn collect_named_in_sdl_type(t: SDLType) -> List(String) {
+fn collect_named_in_sdl_type(t: SdlType) -> List(String) {
   case t {
     sdl_ast.NamedType(name) -> [name]
     sdl_ast.NonNullType(inner) -> collect_named_in_sdl_type(inner)
@@ -178,7 +179,7 @@ fn is_builtin_scalar(name: String) -> Bool {
   }
 }
 
-fn needs_option(doc: SDLDocument) -> Bool {
+fn needs_option(doc: SdlDocument) -> Bool {
   list.any(doc.definitions, fn(def) {
     case def {
       sdl_ast.TypeDefinition(td) -> type_def_needs_option(td)
@@ -197,14 +198,14 @@ fn type_def_needs_option(td: TypeDef) -> Bool {
   }
 }
 
-fn sdl_type_needs_option(t: SDLType) -> Bool {
+fn sdl_type_needs_option(t: SdlType) -> Bool {
   case t {
     sdl_ast.NonNullType(inner) -> sdl_type_nonnull_needs_option(inner)
     _ -> True
   }
 }
 
-fn sdl_type_nonnull_needs_option(t: SDLType) -> Bool {
+fn sdl_type_nonnull_needs_option(t: SdlType) -> Bool {
   case t {
     sdl_ast.ListType(inner) -> sdl_type_needs_option(inner)
     sdl_ast.NonNullType(inner) -> sdl_type_nonnull_needs_option(inner)
@@ -212,13 +213,13 @@ fn sdl_type_nonnull_needs_option(t: SDLType) -> Bool {
   }
 }
 
-pub fn generate_resolvers(doc: SDLDocument, config: GleamGenConfig) -> String {
+pub fn generate_resolvers(doc: SdlDocument, config: GleamGenConfig) -> String {
   generate_resolvers_impl(doc, config, fn(_) { [config.types_module] })
 }
 
 /// Generate resolver stubs with a type→module registry for cross-file imports (directory mode).
 pub fn generate_resolvers_with_registry(
-  doc: SDLDocument,
+  doc: SdlDocument,
   config: GleamGenConfig,
   registry: List(#(String, String)),
 ) -> String {
@@ -258,9 +259,9 @@ pub fn generate_resolvers_with_registry(
 }
 
 fn generate_resolvers_impl(
-  doc: SDLDocument,
+  doc: SdlDocument,
   config: GleamGenConfig,
-  get_type_imports: fn(SDLDocument) -> List(String),
+  get_type_imports: fn(SdlDocument) -> List(String),
 ) -> String {
   let header = "// TODO: Implement resolver functions\n\n"
 
@@ -305,7 +306,7 @@ fn generate_resolvers_impl(
   header <> imports <> stubs
 }
 
-pub fn generate_type_builders(doc: SDLDocument) -> String {
+pub fn generate_type_builders(doc: SdlDocument) -> String {
   doc.definitions
   |> list.filter_map(fn(def) {
     case def {
@@ -443,7 +444,7 @@ fn generate_type_field_line(
   }
 }
 
-fn sdl_inner_type_name(t: SDLType) -> String {
+fn sdl_inner_type_name(t: SdlType) -> String {
   case t {
     sdl_ast.NamedType(name) -> name
     sdl_ast.NonNullType(inner) -> sdl_inner_type_name(inner)
@@ -451,7 +452,7 @@ fn sdl_inner_type_name(t: SDLType) -> String {
   }
 }
 
-fn sdl_type_to_str(t: SDLType) -> String {
+fn sdl_type_to_str(t: SdlType) -> String {
   case t {
     sdl_ast.NamedType(name) -> name
     sdl_ast.NonNullType(inner) -> sdl_type_to_str(inner) <> "!"
@@ -459,7 +460,7 @@ fn sdl_type_to_str(t: SDLType) -> String {
   }
 }
 
-fn resolver_needs_option(doc: SDLDocument) -> Bool {
+fn resolver_needs_option(doc: SdlDocument) -> Bool {
   list.any(doc.definitions, fn(def) {
     case def {
       sdl_ast.TypeDefinition(sdl_ast.ObjectTypeDefinition(obj)) ->
@@ -611,7 +612,7 @@ fn generate_scalar_type(scalar: ScalarTypeDef, config: GleamGenConfig) -> String
 // Type conversion helpers
 
 /// Convert an SDL type to Gleam. Top-level nullable types are wrapped in Option.
-fn sdl_type_to_gleam(sdl_type: SDLType) -> String {
+fn sdl_type_to_gleam(sdl_type: SdlType) -> String {
   case sdl_type {
     sdl_ast.NonNullType(inner) -> sdl_type_to_gleam_nonnull(inner)
     _ -> "Option(" <> sdl_type_to_gleam_nonnull(sdl_type) <> ")"
@@ -619,7 +620,7 @@ fn sdl_type_to_gleam(sdl_type: SDLType) -> String {
 }
 
 /// Convert an SDL type known to be non-null (inside NonNull wrapper).
-fn sdl_type_to_gleam_nonnull(sdl_type: SDLType) -> String {
+fn sdl_type_to_gleam_nonnull(sdl_type: SdlType) -> String {
   case sdl_type {
     sdl_ast.NamedType(name) -> scalar_to_gleam(name)
     sdl_ast.NonNullType(inner) -> sdl_type_to_gleam_nonnull(inner)
@@ -646,36 +647,61 @@ const gleam_keywords = [
   "pub", "test", "todo", "type", "use",
 ]
 
+// GraphQL identifiers are ASCII-only, so case conversion is byte-level.
+// Avoids `string.to_graphemes` (allocates a list per character) and the
+// `string.uppercase == self` trick (does Unicode normalization).
+
 fn to_snake_case(input: String) -> String {
-  let snake =
-    input
-    |> string.to_graphemes
-    |> list.index_map(fn(char, idx) {
-      case is_uppercase(char), idx {
-        True, 0 -> string.lowercase(char)
-        True, _ -> "_" <> string.lowercase(char)
-        False, _ -> char
-      }
-    })
-    |> string.join("")
+  let bytes = bit_array.from_string(input)
+  let assert Ok(snake) = bit_array.to_string(snake_loop(bytes, 0, <<>>))
   case list.contains(gleam_keywords, snake) {
     True -> snake <> "_"
     False -> snake
   }
 }
 
-fn to_pascal_case(input: String) -> String {
-  input
-  |> string.split("_")
-  |> list.map(fn(part) {
-    case string.pop_grapheme(part) {
-      Ok(#(first, rest)) -> string.uppercase(first) <> string.lowercase(rest)
-      Error(_) -> part
+fn snake_loop(bytes: BitArray, idx: Int, acc: BitArray) -> BitArray {
+  case bytes {
+    <<>> -> acc
+    // A-Z → optional underscore + lowercase
+    <<b, rest:bits>> if b >= 65 && b <= 90 -> {
+      let lower = b + 32
+      case idx {
+        0 -> snake_loop(rest, idx + 1, <<acc:bits, lower>>)
+        _ -> snake_loop(rest, idx + 1, <<acc:bits, "_":utf8, lower>>)
+      }
     }
-  })
+    <<b, rest:bits>> -> snake_loop(rest, idx + 1, <<acc:bits, b>>)
+    _ -> acc
+  }
+}
+
+fn to_pascal_case(input: String) -> String {
+  string.split(input, "_")
+  |> list.map(capitalize)
   |> string.join("")
 }
 
-fn is_uppercase(char: String) -> Bool {
-  char == string.uppercase(char) && char != string.lowercase(char)
+/// Uppercase the first byte of an ASCII identifier and lowercase the rest.
+/// `string.uppercase`/`string.lowercase` walk the whole UTF-8 by codepoint
+/// for case folding; for an ASCII-only input we can flip a single bit.
+fn capitalize(part: String) -> String {
+  let bytes = bit_array.from_string(part)
+  let assert Ok(out) = bit_array.to_string(capitalize_loop(bytes, True, <<>>))
+  out
+}
+
+fn capitalize_loop(bytes: BitArray, is_first: Bool, acc: BitArray) -> BitArray {
+  case bytes, is_first {
+    <<>>, _ -> acc
+    // Uppercase first letter
+    <<b, rest:bits>>, True if b >= 97 && b <= 122 ->
+      capitalize_loop(rest, False, <<acc:bits, { b - 32 }>>)
+    <<b, rest:bits>>, True -> capitalize_loop(rest, False, <<acc:bits, b>>)
+    // Lowercase everything after
+    <<b, rest:bits>>, False if b >= 65 && b <= 90 ->
+      capitalize_loop(rest, False, <<acc:bits, { b + 32 }>>)
+    <<b, rest:bits>>, False -> capitalize_loop(rest, False, <<acc:bits, b>>)
+    _, _ -> acc
+  }
 }

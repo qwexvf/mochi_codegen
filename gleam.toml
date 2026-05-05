@@ -2,14 +2,15 @@ name = "mochi_codegen"
 version = "0.2.0"
 description = "Code generation (TypeScript, SDL, Gleam) and CLI for mochi GraphQL"
 licences = ["Apache-2.0"]
-repository = { type = "github", user = "qwexvf", repo = "mochi" }
+repository = { type = "github", user = "qwexvf", repo = "mochi_codegen" }
+gleam = ">= 1.5.0"
 
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
 gleam_json = ">= 3.0.0 and < 4.0.0"
 simplifile = ">= 2.0.0 and < 3.0.0"
-mochi = { git = "https://github.com/qwexvf/mochi", ref = "main" }
-taffy = { git = "https://github.com/qwexvf/taffy", ref = "main" }
+mochi = ">= 2.0.0 and < 3.0.0"
+taffy = { git = "https://github.com/qwexvf/taffy.git", ref = "main" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"
