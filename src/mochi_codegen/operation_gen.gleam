@@ -807,4 +807,3 @@ fn snake_loop(bytes: BitArray, idx: Int, acc: BitArray) -> BitArray {
     _ -> acc
   }
 }
-

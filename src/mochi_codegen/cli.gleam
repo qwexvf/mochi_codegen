@@ -5,10 +5,10 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
-import mochi/parser as mochi_parser
-import mochi/schema.{type Schema}
 import mochi/internal/sdl_ast.{type SdlDocument, SdlDocument}
 import mochi/internal/sdl_parser
+import mochi/parser as mochi_parser
+import mochi/schema.{type Schema}
 import mochi_codegen/config
 import mochi_codegen/gleam as gleam_gen
 import mochi_codegen/operation_gen

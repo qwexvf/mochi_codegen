@@ -1,8 +1,8 @@
 import gleam/string
 import gleeunit/should
-import mochi/parser
 import mochi/internal/sdl_ast
 import mochi/internal/sdl_parser
+import mochi/parser
 import mochi_codegen/operation_gen
 
 fn parse_ops(src: String) {

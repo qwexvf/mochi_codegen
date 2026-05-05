@@ -5,7 +5,7 @@ import gleam/string
 import mochi/internal/sdl_ast.{
   type EnumTypeDef, type EnumValueDef, type FieldDef, type InputFieldDef,
   type InputObjectTypeDef, type InterfaceTypeDef, type ObjectTypeDef,
-  type SdlDocument, type SdlType, type ScalarTypeDef, type TypeDef,
+  type ScalarTypeDef, type SdlDocument, type SdlType, type TypeDef,
   type UnionTypeDef,
 }
 
@@ -653,8 +653,7 @@ const gleam_keywords = [
 
 fn to_snake_case(input: String) -> String {
   let bytes = bit_array.from_string(input)
-  let assert Ok(snake) =
-    bit_array.to_string(snake_loop(bytes, 0, <<>>))
+  let assert Ok(snake) = bit_array.to_string(snake_loop(bytes, 0, <<>>))
   case list.contains(gleam_keywords, snake) {
     True -> snake <> "_"
     False -> snake
@@ -692,11 +691,7 @@ fn capitalize(part: String) -> String {
   out
 }
 
-fn capitalize_loop(
-  bytes: BitArray,
-  is_first: Bool,
-  acc: BitArray,
-) -> BitArray {
+fn capitalize_loop(bytes: BitArray, is_first: Bool, acc: BitArray) -> BitArray {
   case bytes, is_first {
     <<>>, _ -> acc
     // Uppercase first letter
