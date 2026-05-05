@@ -133,8 +133,8 @@ pub fn e2e_codegen_from_schema_and_operations_test() {
   // Non-list non-scalar: posts returns PostConnection!
   queries |> contains("post_connection_to_dynamic") |> should.be_true
 
-  // Input type arg: ListPosts filter
-  queries |> contains("dict.get(args, \"filter\")") |> should.be_true
+  // Input type arg: ListPosts filter (optional)
+  queries |> contains("query.get_optional_dynamic(args, \"filter\")") |> should.be_true
   queries |> contains("decode.run") |> should.be_true
 
   // GetTags (no args) still uses query_with_args
@@ -176,7 +176,7 @@ pub fn e2e_codegen_from_schema_and_operations_test() {
 
   // UpdateUser: mixed ID arg + input arg
   mutations |> contains("query.get_id(args, \"id\")") |> should.be_true
-  mutations |> contains("dict.get(args, \"input\")") |> should.be_true
+  mutations |> contains("query.get_dynamic(args, \"input\")") |> should.be_true
 
   // AddTagToPost / RemoveTagFromPost: two ID args
   mutations

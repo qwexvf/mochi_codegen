@@ -41,7 +41,7 @@ type Post { id: ID! }
 input PostInput { title: String! body: String! }",
     )
   let out = operation_gen.generate(ops, schema)
-  out |> contains("dict.get(args, \"input\")") |> should.be_true
+  out |> contains("query.get_dynamic(args, \"input\")") |> should.be_true
   out |> contains("decode.run") |> should.be_true
   out |> contains("decode.field(\"title\"") |> should.be_true
 }
@@ -82,7 +82,7 @@ input PostInput { title: String! body: String! }",
   out
   |> contains("result.try(query.get_id(args, \"userId\"))")
   |> should.be_true
-  out |> contains("dict.get(args, \"input\")") |> should.be_true
+  out |> contains("query.get_dynamic(args, \"input\")") |> should.be_true
   out |> contains("decode.run") |> should.be_true
   out |> contains("get_string(args, \"input\")") |> should.be_false
 }

@@ -333,10 +333,9 @@ fn generate_input_use_lines(
     True -> {
       let field_lines = build_decoder_field_lines(fields, "        ")
       [
-        "      use " <> dyn_var <> " <- result.try(",
-        "        dict.get(args, \"" <> arg_name <> "\")",
-        "        |> result.map_error(fn(_) { error.new(\"Missing input argument\") }),",
-        "      )",
+        "      use " <> dyn_var <> " <- result.try(query.get_dynamic(args, \""
+          <> arg_name
+          <> "\"))",
         "      let decoder = {",
         field_lines,
         "        decode.success(" <> tuple <> ")",
@@ -354,11 +353,11 @@ fn generate_input_use_lines(
       [
         "      let _"
           <> to_snake_case(arg_name)
-          <> " = case dict.get(args, \""
+          <> " = case query.get_optional_dynamic(args, \""
           <> arg_name
           <> "\") {",
-        "        Error(_) -> option.None",
-        "        Ok(" <> dyn_var <> ") -> {",
+        "        option.None -> option.None",
+        "        option.Some(" <> dyn_var <> ") -> {",
         "          let decoder = {",
         field_lines,
         "            decode.success(" <> tuple <> ")",
