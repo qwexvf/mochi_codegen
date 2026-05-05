@@ -333,7 +333,9 @@ fn generate_input_use_lines(
     True -> {
       let field_lines = build_decoder_field_lines(fields, "        ")
       [
-        "      use " <> dyn_var <> " <- result.try(query.get_dynamic(args, \""
+        "      use "
+          <> dyn_var
+          <> " <- result.try(query.get_dynamic(args, \""
           <> arg_name
           <> "\"))",
         "      let decoder = {",

@@ -134,7 +134,9 @@ pub fn e2e_codegen_from_schema_and_operations_test() {
   queries |> contains("post_connection_to_dynamic") |> should.be_true
 
   // Input type arg: ListPosts filter (optional)
-  queries |> contains("query.get_optional_dynamic(args, \"filter\")") |> should.be_true
+  queries
+  |> contains("query.get_optional_dynamic(args, \"filter\")")
+  |> should.be_true
   queries |> contains("decode.run") |> should.be_true
 
   // GetTags (no args) still uses query_with_args
