@@ -1,8 +1,8 @@
 import gleam/string
 import gleeunit/should
 import mochi/parser
-import mochi/sdl_ast
-import mochi/sdl_parser
+import mochi/internal/sdl_ast
+import mochi/internal/sdl_parser
 import mochi_codegen/operation_gen
 
 fn parse_ops(src: String) {
@@ -10,7 +10,7 @@ fn parse_ops(src: String) {
   doc
 }
 
-fn parse_schema(src: String) -> sdl_ast.SDLDocument {
+fn parse_schema(src: String) -> sdl_ast.SdlDocument {
   let assert Ok(doc) = sdl_parser.parse_sdl(src)
   doc
 }
