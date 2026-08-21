@@ -32,14 +32,14 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
       - uses: erlef/setup-beam@v1
         with:
           otp-version: "28.3"
-          gleam-version: "1.15.4"
+          gleam-version: "1.18.1"
           rebar3-version: "3"
 
       - name: Verify tag matches gleam.toml version
