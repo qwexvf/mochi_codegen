@@ -550,7 +550,10 @@ fn get_custom_directives(schema: Schema) -> List(DirectiveDefinition) {
 // Directive Generation
 // ============================================================================
 
-fn generate_directive(directive: DirectiveDefinition, config: Config) -> String {
+fn generate_directive(
+  directive: DirectiveDefinition,
+  config: Config,
+) -> String {
   let desc = generate_description(directive.description, "", config)
 
   let args = case dict.size(directive.arguments) > 0 {

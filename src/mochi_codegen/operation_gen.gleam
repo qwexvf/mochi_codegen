@@ -761,7 +761,10 @@ fn has_nullable_input_arg(op: ast.Operation, schema_doc: SdlDocument) -> Bool {
   })
 }
 
-fn has_nullable_input_field(op: ast.Operation, schema_doc: SdlDocument) -> Bool {
+fn has_nullable_input_field(
+  op: ast.Operation,
+  schema_doc: SdlDocument,
+) -> Bool {
   let vars = case op {
     ast.Operation(variable_definitions: v, ..) -> v
     ast.ShorthandQuery(_) -> []

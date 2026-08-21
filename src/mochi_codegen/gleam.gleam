@@ -600,7 +600,10 @@ fn generate_input_field(field: InputFieldDef) -> String {
   field_name <> ": " <> field_type
 }
 
-fn generate_scalar_type(scalar: ScalarTypeDef, config: GleamGenConfig) -> String {
+fn generate_scalar_type(
+  scalar: ScalarTypeDef,
+  config: GleamGenConfig,
+) -> String {
   let doc = case config.generate_docs, scalar.description {
     True, Some(desc) -> "/// " <> desc <> "\n"
     _, _ -> ""
